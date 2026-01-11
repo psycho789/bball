@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="basketballGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f7931a;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#ff6b6b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Basketball sphere -->
+  <circle cx="50" cy="50" r="45" fill="url(#basketballGradient)" filter="url(#shadow)"/>
+  
+  <!-- Basketball lines (curved) -->
+  <path d="M 50 5 Q 25 25 5 50 Q 25 75 50 95" stroke="#0a0a0f" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M 50 5 Q 75 25 95 50 Q 75 75 50 95" stroke="#0a0a0f" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <ellipse cx="50" cy="50" rx="40" ry="8" stroke="#0a0a0f" stroke-width="2.5" fill="none"/>
+  
+  <!-- Center highlight -->
+  <circle cx="50" cy="50" r="3" fill="#ffffff" opacity="0.6"/>
+</svg>
+

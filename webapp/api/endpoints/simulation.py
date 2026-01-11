@@ -7,7 +7,7 @@ Big O: O(n) where n = aligned data points per game
 """
 
 from typing import Any, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 import sys
 import os
 import importlib.util
@@ -16,6 +16,7 @@ import threading
 import hashlib
 import json
 import copy
+import asyncio
 
 # Import simulation logic from scripts directory
 script_path = os.path.join(os.path.dirname(__file__), '../../../scripts/trade/simulate_trading_strategy.py')
@@ -48,7 +49,7 @@ _simulation_cache = SimpleCache(ttl_seconds=86400 * 365, cache_file="simulation_
 _simulation_cache_lock = threading.Lock()  # Thread-safe cache access
 
 
-@router.get("/games/{game_id}/simulation")
+@router.get("/api/games/{game_id}/simulation")
 def get_simulation_results(
     game_id: str,
     entry_threshold: float = Query(0.05, description="Divergence threshold to enter position (default: 0.05 = 5 cents)"),
@@ -137,7 +138,7 @@ def get_simulation_results(
         raise HTTPException(status_code=500, detail=f"Error running simulation: {str(e)}")
 
 
-@router.get("/simulation/bulk")
+@router.get("/api/simulation/bulk")
 def get_bulk_simulation_results(
     num_games: int = Query(..., ge=1, le=500, description="Number of most recent games to simulate"),
     entry_threshold: float = Query(0.05, description="Divergence threshold to enter position (default: 0.05 = 5 cents)"),
@@ -663,6 +664,8 @@ def get_bulk_simulation_results(
             cumulative_profits.append(running_total)
         
         # Find maximum drawdown
+        # Use initial capital (total capital deployed) as baseline for percentage calculation
+        total_capital_deployed = total_trades * bet_amount if total_trades > 0 else bet_amount
         peak = 0.0
         max_drawdown_dollars = 0.0
         max_drawdown_percent = 0.0
@@ -672,10 +675,15 @@ def get_bulk_simulation_results(
             drawdown = peak - equity
             if drawdown > max_drawdown_dollars:
                 max_drawdown_dollars = drawdown
-                if peak != 0:
+                # Calculate percentage based on peak equity, or use capital deployed if peak is 0 or negative
+                if peak > 0:
                     max_drawdown_percent = (drawdown / peak) * 100.0
+                elif total_capital_deployed > 0:
+                    # If we haven't reached a positive peak yet, use capital deployed as denominator
+                    max_drawdown_percent = (drawdown / total_capital_deployed) * 100.0
                 else:
-                    max_drawdown_percent = drawdown * 100.0 if drawdown != 0 else 0.0
+                    # Fallback: if no capital deployed, just show dollar amount (percentage = N/A)
+                    max_drawdown_percent = 0.0
         
         # 14. Equity curve data (for charting)
         equity_curve = [
@@ -803,10 +811,13 @@ def get_bulk_simulation_results(
         raise HTTPException(status_code=500, detail=f"Error running bulk simulation: {str(e)}")
 
 
-@router.get("/simulation/progress/{request_id}")
+@router.get("/api/simulation/progress/{request_id}")
 def get_simulation_progress(request_id: str) -> dict[str, Any]:
     """
     Get progress for a running simulation (thread-safe).
+    
+    Maintained for backward compatibility and initial status checks.
+    For real-time updates, use WebSocket endpoint at /ws/simulation/{request_id}
     """
     with _progress_lock:
         if request_id not in _simulation_progress:
@@ -815,7 +826,127 @@ def get_simulation_progress(request_id: str) -> dict[str, Any]:
         return _simulation_progress[request_id].copy()  # Return copy to avoid race conditions
 
 
-@router.post("/simulation/clear-cache")
+@router.websocket("/ws/simulation/{request_id}")
+async def websocket_simulation_progress(websocket: WebSocket, request_id: str):
+    """
+    WebSocket endpoint for streaming simulation progress in real-time.
+    
+    Design Pattern: WebSocket Handler Pattern + Observer Pattern
+    Algorithm: File monitoring with polling + broadcast to connected clients
+    Big O: O(1) per connection, O(1) per progress update
+    
+    Message format sent to client:
+        {
+            "type": "progress",
+            "progress": {
+                "status": "running" | "complete" | "error",
+                "current": int,
+                "total": int,
+                ...
+            }
+        }
+    
+    Connection closes automatically when simulation completes or errors.
+    """
+    client_ip = None
+    if websocket.client:
+        client_ip = websocket.client.host
+    
+    logger.info(f"WebSocket simulation progress connection attempt: request_id={request_id}, client_ip={client_ip}")
+    
+    # Validate request_id exists or will exist soon
+    with _progress_lock:
+        if request_id not in _simulation_progress:
+            # Request might not exist yet if simulation just started
+            # Allow connection but will send initial state when available
+            initial_status = {"status": "not_found", "current": 0, "total": 0}
+        else:
+            initial_status = _simulation_progress[request_id].copy()
+    
+    try:
+        await websocket.accept()
+        logger.info(f"WebSocket simulation progress connection accepted: request_id={request_id}, client_ip={client_ip}")
+        
+        # Send initial progress state
+        await websocket.send_json({
+            "type": "progress",
+            "progress": initial_status
+        })
+        
+        # Track last sent progress to detect changes
+        last_progress = initial_status.copy()
+        
+        # Monitor progress for changes
+        while True:
+            try:
+                # Check for progress updates every 100ms
+                await asyncio.sleep(0.1)
+                
+                with _progress_lock:
+                    if request_id not in _simulation_progress:
+                        # Simulation not found or hasn't started yet
+                        # Keep connection alive for a bit in case it starts soon
+                        continue
+                    
+                    current_progress = _simulation_progress[request_id].copy()
+                
+                # Check if progress has changed
+                if current_progress != last_progress:
+                    # Progress changed, send update
+                    await websocket.send_json({
+                        "type": "progress",
+                        "progress": current_progress
+                    })
+                    last_progress = current_progress
+                    
+                    # Close connection if simulation is complete or errored
+                    status = current_progress.get("status", "unknown")
+                    if status == "complete" or status == "error":
+                        logger.info(f"Simulation {request_id} finished with status {status}, closing WebSocket connection")
+                        await websocket.close(code=1000, reason=f"Simulation {status}")
+                        break
+                
+                # Handle incoming messages (ping/pong for connection health)
+                try:
+                    message = await asyncio.wait_for(websocket.receive_text(), timeout=0.05)
+                    try:
+                        data = json.loads(message)
+                        if data.get("type") == "ping":
+                            await websocket.send_json({
+                                "type": "pong",
+                                "timestamp": asyncio.get_event_loop().time()
+                            })
+                    except json.JSONDecodeError:
+                        pass
+                except asyncio.TimeoutError:
+                    # No message received, continue monitoring
+                    continue
+                    
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket simulation progress connection disconnected: request_id={request_id}")
+                break
+            except Exception as e:
+                logger.error(f"Error in simulation progress WebSocket: {e}", exc_info=True)
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Error: {str(e)}"
+                    })
+                except Exception:
+                    pass
+                await asyncio.sleep(1)  # Wait before retrying
+    
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket simulation progress connection closed normally: request_id={request_id}")
+    except Exception as e:
+        logger.error(f"WebSocket simulation progress error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=f"Server error: {str(e)}")
+        except Exception:
+            pass
+
+
+@router.post("/api/simulation/clear-cache")
 def clear_simulation_cache() -> dict[str, Any]:
     """
     Clear the simulation results cache.

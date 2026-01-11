@@ -42,23 +42,42 @@ body {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 32px;
-    padding-bottom: 24px;
+    padding: 20px 0;
     border-bottom: 1px solid var(--border-color);
+    gap: 32px;
+}
+
+.header-brand {
+    flex-shrink: 0;
+}
+
+.brand-link {
+    text-decoration: none;
+    display: block;
+}
+
+.brand-link:hover .app-title {
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
 }
 
 .app-title {
-    font-size: 1.5rem;
+    font-size: 1.75rem;
     font-weight: 700;
     background: linear-gradient(135deg, var(--accent-home), var(--accent-highlight));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    margin: 0;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
 }
 
 .app-subtitle {
     color: var(--text-secondary);
     font-size: 0.875rem;
-    margin-top: 4px;
+    margin-top: 6px;
+    margin-bottom: 0;
 }
 
 .data-sources {
@@ -86,9 +105,77 @@ body {
     border: 1px solid rgba(247, 147, 26, 0.3);
 }
 
+/* Header Navigation */
+.header-nav {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: 'Space Grotesk', sans-serif;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.nav-link:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-highlight);
+    color: var(--accent-highlight);
+    transform: translateY(-1px);
+}
+
+.nav-link.active {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(0, 212, 170, 0.15));
+    border-color: var(--accent-highlight);
+    color: var(--accent-highlight);
+}
+
+.nav-link.nav-button {
+    background: var(--bg-card);
+}
+
+.nav-link.nav-button:hover:not(:disabled) {
+    background: var(--bg-secondary);
+    border-color: var(--accent-highlight);
+    color: var(--accent-highlight);
+}
+
+.nav-link.nav-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.nav-icon {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.nav-text {
+    line-height: 1;
+}
+
+/* Legacy classes for backward compatibility */
 .stats-page-link,
-.simulation-link {
-    padding: 8px 16px;
+.simulation-link,
+.live-games-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -99,14 +186,19 @@ body {
     transition: all 0.2s ease;
 }
 
-.header-links {
-    display: flex;
-    gap: 12px;
-    align-items: center;
+.stats-page-link:hover,
+.simulation-link:hover,
+.live-games-link:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-highlight);
+    color: var(--accent-highlight);
 }
 
 .clear-cache-btn {
-    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -128,11 +220,6 @@ body {
 .clear-cache-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-}
-
-.stats-page-link:hover {
-    border-color: var(--accent-highlight);
-    color: var(--accent-highlight);
 }
 
 /* Game Selector */
@@ -287,6 +374,18 @@ body {
     color: var(--text-secondary);
     font-size: 0.875rem;
     margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.score-separator {
+    color: var(--text-secondary);
+}
+
+.score-winner {
+    color: var(--accent-home);
+    font-weight: 700;
 }
 
 .game-card-stats {
@@ -334,6 +433,39 @@ body {
 }
 
 /* Stats Page Header */
+/* Consistent page header style for all pages */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.page-header > div:first-child {
+    flex: 1;
+}
+
+.page-header h2 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+    background: linear-gradient(135deg, var(--accent-home), var(--accent-highlight));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.page-header-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* Legacy classes for backward compatibility */
 .stats-page-header {
     display: flex;
     justify-content: space-between;
@@ -765,23 +897,71 @@ body {
 .new-games-badge {
     display: none;
     position: absolute;
-    top: -8px;
-    right: -8px;
+    top: -6px;
+    right: -6px;
     background: var(--accent-away);
     color: white;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 700;
-    padding: 4px 8px;
-    border-radius: 12px;
-    min-width: 20px;
+    padding: 3px 6px;
+    border-radius: 10px;
+    min-width: 18px;
     text-align: center;
     line-height: 1.2;
+    z-index: 10;
 }
 
 .update-status {
-    font-size: 0.875rem;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 8px;
+    font-size: 0.75rem;
     color: var(--text-secondary);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 12px;
     display: none;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.app-header {
+    position: relative;
+}
+
+.update-btn.nav-link {
+    position: relative;
+}
+
+.update-btn.nav-link:hover:not(:disabled) {
+    /* Use same hover style as other nav buttons */
+}
+
+.update-btn.nav-link:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.update-btn.nav-link.updating {
+    opacity: 0.8;
+    padding-right: 40px;
+}
+
+.update-btn.nav-link.updating::after {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    border: 2px solid var(--text-primary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
 }
 
 /* Legend */
@@ -1045,30 +1225,12 @@ body {
 }
 
 /* Stats Page Header */
-.stats-page-header {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    margin-bottom: 32px;
-    padding-bottom: 24px;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.stats-page-header h2 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, var(--accent-home), var(--accent-highlight));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 8px;
-}
-
+/* Legacy stats-page-subtitle for backward compatibility */
 .stats-page-subtitle {
     color: var(--text-secondary);
-    font-size: 1rem;
-    max-width: 600px;
+    font-size: 0.875rem;
+    margin: 0;
+    line-height: 1.5;
 }
 
 /* Chart Container for Aggregate Stats */
@@ -1272,20 +1434,28 @@ h5 {
 .live-games-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
+    align-items: flex-start;
+    gap: 24px;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .live-games-header h2 {
-    font-size: 1.5rem;
+    font-size: 2rem;
     font-weight: 700;
-    color: var(--text-primary);
+    margin: 0 0 8px 0;
+    background: linear-gradient(135deg, var(--accent-home), var(--accent-highlight));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .live-games-controls {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 16px;
+    flex-shrink: 0;
 }
 
 .refresh-button {
@@ -1554,6 +1724,8 @@ h5 {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .simulation-header h2 {
@@ -1750,6 +1922,329 @@ h5 {
     }
 }
 
+/* Grid Search Specific Styles */
+.grid-search-section {
+    margin-bottom: 16px;
+}
+
+.grid-search-section:last-of-type {
+    margin-bottom: 12px;
+}
+
+.section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.checkbox-field {
+    display: flex;
+    align-items: flex-end;
+}
+
+.checkbox-field .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    margin: 0;
+    padding-bottom: 0;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    user-select: none;
+}
+
+.checkbox-field .checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent-highlight);
+}
+
+.grid-search-submit {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+}
+
+.grid-search-submit .btn-primary {
+    min-width: 180px;
+}
+
+/* Grid Search Page Scoped Styles */
+#gridSearchView {
+    position: relative;
+}
+
+/* Form Container - Constrain width and center */
+#gridSearchView .grid-search-form-container {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+/* Sticky Loading Overlay - Match form width and prevent layout jump */
+#gridSearchView .grid-search-loading-overlay {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: var(--bg-card);
+    border-bottom: 2px solid var(--accent-highlight);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    /* Reserve space to prevent layout jump */
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+}
+
+#gridSearchView .grid-search-loading-overlay[style*="display: none"] {
+    /* When hidden, still reserve minimal space to prevent jump */
+    min-height: 0;
+    padding: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+    box-shadow: none;
+}
+
+#gridSearchView .grid-search-loading-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    max-width: 1000px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 0 1rem;
+}
+
+#gridSearchView .grid-search-loading-text {
+    flex: 1;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+
+#gridSearchView .grid-search-loading-content .loading-spinner {
+    flex-shrink: 0;
+}
+
+/* Override simulation-inputs-row only for grid search */
+#gridSearchView .simulation-inputs-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+
+#gridSearchView .range-fieldset:hover {
+    border-color: rgba(124, 58, 237, 0.3);
+}
+
+#gridSearchView input:focus,
+#gridSearchView select:focus {
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+}
+
+/* Basic Settings Grid */
+#gridSearchView .grid-search-basic {
+    margin-bottom: 1.5rem;
+}
+
+#gridSearchView .grid-search-basic-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+/* Range Fieldsets - Cohesive Blocks, span 3 columns */
+#gridSearchView .range-fieldset {
+    grid-column: span 3;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    margin: 0;
+    min-width: 0; /* Prevent stretching */
+}
+
+#gridSearchView .range-fieldset legend {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0 0.5rem;
+}
+
+#gridSearchView .range-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 0.5rem;
+}
+
+/* Action Group - Bet Amount + Submit Button */
+#gridSearchView .grid-search-action-group {
+    grid-column: span 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+}
+
+#gridSearchView .grid-search-action-group .sim-input-group {
+    flex: 1;
+}
+
+#gridSearchView .grid-search-submit-wrapper {
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+}
+
+#gridSearchView .grid-search-submit-wrapper .btn-primary {
+    min-width: 180px;
+    flex-shrink: 0;
+}
+
+/* Advanced Settings */
+#gridSearchView .grid-search-advanced {
+    margin-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+    padding-top: 1rem;
+}
+
+#gridSearchView .grid-search-advanced summary {
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 0.5rem 0;
+    user-select: none;
+    list-style: none;
+}
+
+#gridSearchView .grid-search-advanced summary::-webkit-details-marker {
+    display: none;
+}
+
+#gridSearchView .grid-search-advanced summary::before {
+    content: "▶";
+    display: inline-block;
+    margin-right: 0.5rem;
+    transition: transform 0.2s;
+    color: var(--accent-highlight);
+}
+
+#gridSearchView .grid-search-advanced[open] summary::before {
+    transform: rotate(90deg);
+}
+
+#gridSearchView .grid-search-advanced-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+}
+
+#gridSearchView .grid-search-error-wrapper {
+    grid-column: 1 / -1;
+}
+
+/* Checkbox alignment in advanced section */
+#gridSearchView .grid-search-advanced-grid .checkbox-field {
+    display: flex;
+    align-items: flex-end;
+}
+
+#gridSearchView .grid-search-advanced-grid .checkbox-field .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    margin: 0;
+    padding-bottom: 0;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    user-select: none;
+    width: 100%;
+    min-height: 36px; /* Match input height */
+    align-items: center;
+}
+
+#gridSearchView .grid-search-advanced-grid .checkbox-field .checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent-highlight);
+    flex-shrink: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1000px) {
+    #gridSearchView .grid-search-form-container {
+        padding: 0 0.5rem;
+    }
+    
+    #gridSearchView .grid-search-loading-content {
+        padding: 0 0.5rem;
+    }
+}
+
+@media (max-width: 900px) {
+    #gridSearchView .grid-search-basic-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    #gridSearchView .range-fieldset {
+        grid-column: span 2;
+    }
+    
+    #gridSearchView .grid-search-action-group {
+        grid-column: span 2;
+        flex-direction: row;
+        align-items: flex-end;
+    }
+    
+    #gridSearchView .grid-search-submit-wrapper {
+        flex: 1;
+        justify-content: flex-end;
+    }
+}
+
+@media (max-width: 768px) {
+    #gridSearchView .grid-search-basic-grid,
+    #gridSearchView .grid-search-advanced-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    #gridSearchView .range-fieldset {
+        grid-column: span 1;
+    }
+    
+    #gridSearchView .range-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    #gridSearchView .grid-search-action-group {
+        grid-column: span 1;
+        flex-direction: column;
+    }
+    
+    #gridSearchView .grid-search-submit-wrapper {
+        width: 100%;
+    }
+    
+    #gridSearchView .grid-search-submit-wrapper .btn-primary {
+        width: 100%;
+    }
+}
+
 .sim-input-group {
     display: flex;
     flex-direction: column;
@@ -1762,7 +2257,8 @@ h5 {
     font-weight: 500;
 }
 
-.sim-input-group input {
+.sim-input-group input,
+.sim-input-group select {
     padding: 8px 10px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -1772,9 +2268,19 @@ h5 {
     font-family: 'JetBrains Mono', monospace;
 }
 
-.sim-input-group input:focus {
+.sim-input-group input:focus,
+.sim-input-group select:focus {
     outline: none;
     border-color: var(--accent-highlight);
+}
+
+.sim-input-group select {
+    cursor: pointer;
+}
+
+.sim-input-group select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .sim-input-group .btn-primary {
@@ -2021,6 +2527,12 @@ h5 {
     color: var(--text-secondary);
 }
 
+#gridSearchView .grid-search-advanced[open] {
+    background: var(--bg-secondary);
+    padding: 1rem;
+    border-radius: 8px;
+  }
+
 .results-metadata[open] .metadata-summary::before {
     transform: rotate(90deg);
 }
@@ -2266,12 +2778,40 @@ h5 {
     justify-content: center;
     align-items: center;
     min-height: 200px;
-    padding: 32px 24px;
-    margin: 24px 0;
+    padding: 0 24px;
+    margin: -40px 0 24px 0;
 }
 
 .simulation-loading .loading {
     text-align: center;
+}
+
+.sim-button-container {
+    position: relative; /* For absolute positioning of loading indicator */
+    height: 44px; /* Match button height to prevent vertical shifts */
+    display: inline-block; /* Don't expand to fill grid cell */
+}
+
+.sim-button-container .btn-primary {
+    height: 44px; /* Fixed height to prevent jumping */
+    width: 160px; /* Fixed width - button will always be this size */
+    box-sizing: border-box;
+}
+
+.simulation-loading-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    height: 44px; /* Match button height */
+    position: absolute; /* Position absolutely so it doesn't affect grid layout */
+    left: calc(100% + 12px); /* Position to the right of button with gap */
+    top: 0;
+}
+
+.simulation-loading-inline #loadingProgressText {
+    font-family: 'JetBrains Mono', monospace; /* Monospace prevents width changes */
+    display: inline-block;
 }
 
 .risk-value {

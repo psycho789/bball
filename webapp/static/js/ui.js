@@ -100,11 +100,12 @@ function renderGameCard(game, stats = null) {
                     <span>${game.away_team_abbr}</span>
                     ${!game.home_won ? '<span class="winner-indicator"></span>' : ''}
                 </div>
-                ${game.has_kalshi ? '<span class="kalshi-badge">KALSHI</span>' : ''}
             </div>
             ${gameDateHtml}
             <div class="game-score">
-                ${game.final_home_score} - ${game.final_away_score}
+                <span class="${game.home_won ? 'score-winner' : ''}">${game.final_home_score}</span>
+                <span class="score-separator"> - </span>
+                <span class="${!game.home_won ? 'score-winner' : ''}">${game.final_away_score}</span>
             </div>
             ${statsHtml}
         </div>
@@ -312,8 +313,8 @@ async function checkNewGames() {
         
         const badge = document.getElementById('newGamesBadge');
         if (badge) {
-            // Use new_kalshi_candlesticks (the last step of update)
-            const count = data.new_kalshi_candlesticks || 0;
+            // Use total_new which includes both ESPN games and Kalshi candlesticks
+            const count = data.total_new || data.new_kalshi_candlesticks || 0;
             if (count > 0) {
                 badge.textContent = count;
                 badge.style.display = 'inline-block';
@@ -325,115 +326,181 @@ async function checkNewGames() {
         return data;
     } catch (error) {
         console.error('Error checking new games:', error);
-        return { new_kalshi_candlesticks: 0, has_new_data: false };
+        return { total_new: 0, new_kalshi_candlesticks: 0, has_new_data: false };
     }
 }
 
-// Poll update status
-let updateStatusPollInterval = null;
-let isPolling = false;
+// WebSocket connection for update status
+let updateStatusWebSocket = null;
+let updateStatusWasRunning = false; // Track if update was running to detect completion
 
-async function pollUpdateStatus() {
-    // Prevent concurrent calls
-    if (isPolling) {
+/**
+ * Connect to WebSocket for update status updates.
+ * 
+ * Design Pattern: WebSocket Handler Pattern
+ * Algorithm: O(1) connection, O(1) per update
+ * Big O: O(1) for connection operations, O(1) for message handling
+ * 
+ * @returns {WebSocket} WebSocket connection (can be used to disconnect)
+ */
+function connectUpdateStatusWebSocket() {
+    // Don't create multiple connections
+    if (updateStatusWebSocket && updateStatusWebSocket.readyState === WebSocket.OPEN) {
+        console.log('Update status WebSocket already connected');
+        return updateStatusWebSocket;
+    }
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const url = `${protocol}//${host}/ws/update/status`;
+    
+    console.log(`Connecting to update status WebSocket: ${url}`);
+    
+    const ws = new WebSocket(url);
+    
+    ws.onopen = () => {
+        console.log('Update status WebSocket connected');
+    };
+    
+    ws.onmessage = async (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'status') {
+                handleUpdateStatusChange(data.is_running, data.message);
+            } else if (data.type === 'error') {
+                console.error('Update status WebSocket error:', data.message);
+                // Fallback to HTTP check
+                const status = await checkUpdateStatusApi();
+                handleUpdateStatusChange(status.is_running, status.message);
+            } else if (data.type === 'pong') {
+                // Connection health check response
+                // No action needed
+            }
+        } catch (error) {
+            console.error('Error parsing update status WebSocket message:', error, event.data);
+        }
+    };
+    
+    ws.onerror = async (error) => {
+        console.error('Update status WebSocket error:', error);
+        // Fallback: try HTTP endpoint once
+        try {
+            const status = await checkUpdateStatusApi();
+            handleUpdateStatusChange(status.is_running, status.message);
+        } catch (err) {
+            console.error('Fallback HTTP request also failed:', err);
+        }
+    };
+    
+    ws.onclose = (event) => {
+        console.log('Update status WebSocket closed:', event.code, event.reason);
+        updateStatusWebSocket = null;
+        // Optionally reconnect if update is still running
+        // For now, just log the closure
+    };
+    
+    // Send ping every 30 seconds to keep connection alive
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+        } else {
+            clearInterval(pingInterval);
+        }
+    }, 30000);
+    
+    // Clean up ping interval when connection closes
+    ws.addEventListener('close', () => {
+        clearInterval(pingInterval);
+    });
+    
+    updateStatusWebSocket = ws;
+    return ws;
+}
+
+/**
+ * Handle update status change from WebSocket or HTTP.
+ * 
+ * @param {boolean} isRunning - Whether update is currently running
+ * @param {string} message - Status message
+ */
+async function handleUpdateStatusChange(isRunning, message) {
+    const updateBtn = document.getElementById('updateDataBtn');
+    const statusEl = document.getElementById('updateStatus');
+    const btnText = updateBtn?.querySelector('.nav-text');
+    
+    if (!updateBtn || !statusEl) {
         return;
     }
     
-    isPolling = true;
+    if (isRunning) {
+        // Update is in progress
+        updateBtn.disabled = true;
+        updateBtn.classList.add('updating');
+        if (btnText) btnText.textContent = 'Updating...';
+        statusEl.textContent = message || 'Update in progress. This may take several minutes.';
+        statusEl.style.display = 'block';
+        updateStatusWasRunning = true;
+    } else {
+        // Update is complete
+        const wasRunning = updateStatusWasRunning;
+        updateStatusWasRunning = false;
+        
+        updateBtn.disabled = false;
+        updateBtn.classList.remove('updating');
+        if (btnText) btnText.textContent = 'Refetch';
+        
+        // Refresh data when update completes (if it was running)
+        if (wasRunning) {
+            // Refresh without starting new polling
+            const filters = getFilters();
+            const response = await loadGames(0, 50, filters);
+            await renderGamesList(response.games, false);
+            currentOffset = response.games.length;
+            hasMoreGames = response.has_more;
+            setupInfiniteScroll();
+            await checkNewGames();
+        }
+        
+        statusEl.textContent = 'Update complete.';
+        setTimeout(() => {
+            statusEl.textContent = '';
+            statusEl.style.display = 'none';
+        }, 3000);
+    }
+}
+
+/**
+ * Check update status (HTTP fallback or initial check).
+ * 
+ * @returns {Promise<Object>} Status object with is_running and message
+ */
+async function checkUpdateStatus() {
     try {
         const status = await checkUpdateStatusApi();
-        const updateBtn = document.getElementById('updateDataBtn');
-        const statusEl = document.getElementById('updateStatus');
-        const btnText = updateBtn?.querySelector('.update-btn-text');
-        
-        if (!updateBtn || !statusEl) {
-            isPolling = false;
-            return;
-        }
-        
-        if (status.is_running) {
-            // Update is in progress
-            updateBtn.disabled = true;
-            updateBtn.classList.add('updating');
-            if (btnText) btnText.textContent = 'Updating...';
-            statusEl.textContent = 'Update in progress. This may take several minutes.';
-            statusEl.style.display = 'inline';
-        } else {
-            // Update is complete - stop polling first to prevent race conditions
-            if (updateStatusPollInterval) {
-                clearInterval(updateStatusPollInterval);
-                updateStatusPollInterval = null;
-            }
-            
-            updateBtn.disabled = false;
-            updateBtn.classList.remove('updating');
-            if (btnText) btnText.textContent = 'Update Data';
-            
-            // Refresh data when update completes
-            // Use a flag to prevent calling initializeGamesList which would start polling again
-            const wasPolling = updateStatusPollInterval !== null;
-            
-            if (wasPolling) {
-                // Refresh data
-                // Temporarily stop polling to prevent recursion
-                stopUpdateStatusPolling();
-                
-                // Refresh without starting new polling
-                const filters = getFilters();
-                const response = await loadGames(0, 50, filters);
-                await renderGamesList(response.games, false);
-                currentOffset = response.games.length;
-                hasMoreGames = response.has_more;
-                setupInfiniteScroll();
-                await checkNewGames();
-            }
-            
-            statusEl.textContent = 'Update complete.';
-            setTimeout(() => {
-                statusEl.textContent = '';
-                statusEl.style.display = 'none';
-            }, 3000);
-        }
+        await handleUpdateStatusChange(status.is_running, status.message);
+        return status;
     } catch (error) {
         console.error('Error checking update status:', error);
-    } finally {
-        isPolling = false;
+        return { is_running: false, message: 'Error checking status' };
     }
 }
 
-// Start polling update status
-function startUpdateStatusPolling() {
-    // Clear any existing interval first
-    if (updateStatusPollInterval) {
-        clearInterval(updateStatusPollInterval);
-        updateStatusPollInterval = null;
+/**
+ * Disconnect update status WebSocket.
+ */
+function disconnectUpdateStatusWebSocket() {
+    if (updateStatusWebSocket) {
+        updateStatusWebSocket.close();
+        updateStatusWebSocket = null;
     }
-    
-    // Check immediately
-    pollUpdateStatus();
-    
-    // Then poll every 2 seconds (only if not already polling)
-    if (!updateStatusPollInterval) {
-        updateStatusPollInterval = setInterval(() => {
-            pollUpdateStatus();
-        }, 2000);
-    }
-}
-
-// Stop polling
-function stopUpdateStatusPolling() {
-    if (updateStatusPollInterval) {
-        clearInterval(updateStatusPollInterval);
-        updateStatusPollInterval = null;
-    }
-    isPolling = false;
 }
 
 // Trigger data update
 async function triggerDataUpdate() {
     const updateBtn = document.getElementById('updateDataBtn');
     const statusEl = document.getElementById('updateStatus');
-    const btnText = updateBtn?.querySelector('.update-btn-text');
+    const btnText = updateBtn?.querySelector('.nav-text');
     
     if (!updateBtn || !statusEl) return;
     
@@ -442,25 +509,25 @@ async function triggerDataUpdate() {
     updateBtn.classList.add('updating');
     if (btnText) btnText.textContent = 'Updating...';
     statusEl.textContent = 'Starting update...';
-    statusEl.style.display = 'inline';
+    statusEl.style.display = 'block';
     
     try {
         const data = await triggerUpdateApi();
         statusEl.textContent = data.message || 'Update started. This may take several minutes.';
         
-        // Start polling for status
-        startUpdateStatusPolling();
+        // Connect to WebSocket for real-time status updates
+        connectUpdateStatusWebSocket();
         
     } catch (error) {
         console.error('Error triggering update:', error);
         statusEl.textContent = 'Error: ' + error.message;
         updateBtn.disabled = false;
         updateBtn.classList.remove('updating');
-        if (btnText) btnText.textContent = 'Update Data';
+        if (btnText) btnText.textContent = 'Refetch';
         
-        // If it's a 409 (already running), start polling
+        // If it's a 409 (already running), connect to WebSocket
         if (error.message.includes('409') || error.message.includes('already running')) {
-            startUpdateStatusPolling();
+            connectUpdateStatusWebSocket();
         }
     }
 }
@@ -481,18 +548,11 @@ async function initializeGamesList() {
         // Check for new games
         checkNewGames();
         
-        // Setup update button
-        const updateBtn = document.getElementById('updateDataBtn');
-        if (updateBtn) {
-            updateBtn.addEventListener('click', triggerDataUpdate);
-        }
-        
-        // Check update status once on page load (don't start continuous polling unless update is running)
-        pollUpdateStatus().then(() => {
-            // If update is running, start polling
-            const statusEl = document.getElementById('updateStatus');
-            if (statusEl && statusEl.style.display === 'inline') {
-                startUpdateStatusPolling();
+        // Check update status once on page load, then connect WebSocket if update is running
+        checkUpdateStatus().then((status) => {
+            // If update is running, connect to WebSocket for real-time updates
+            if (status.is_running) {
+                connectUpdateStatusWebSocket();
             }
         });
     } catch (error) {

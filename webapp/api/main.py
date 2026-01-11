@@ -31,11 +31,11 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .logging_config import setup_logging, get_logger, DEBUG_MODE
-from .endpoints import games, probabilities, metadata, stats, aggregate_stats, live_games, live_data, simulation, update, model_evaluation
+from .endpoints import games, probabilities, metadata, stats, aggregate_stats, live_games, live_data, simulation, update, model_evaluation, grid_search, logs
 from .websocket_manager import get_websocket_manager
 
 # Global flag for graceful shutdown
@@ -51,8 +51,8 @@ SHOULD_PRELOAD = (
     and os.getenv("RELOADER") is None  # Skip in reload mode (development)
 )
 
-# Set up logging
-logger = setup_logging()
+# Set up logging (overwrite log file on app restart)
+logger = setup_logging(overwrite_log_file=True)
 
 # =============================================================================
 # App Setup
@@ -138,9 +138,11 @@ app.include_router(stats.router, prefix="/api", tags=["stats"])
 app.include_router(aggregate_stats.router, prefix="/api", tags=["aggregate_stats"])
 app.include_router(model_evaluation.router, prefix="/api", tags=["model_evaluation"])
 app.include_router(live_games.router, prefix="/api", tags=["live_games"])
-app.include_router(live_data.router, tags=["live_data"])
-app.include_router(simulation.router, prefix="/api", tags=["simulation"])
-app.include_router(update.router, prefix="/api", tags=["update"])
+app.include_router(live_data.router, tags=["live_data"])  # No prefix - has /ws/live/{game_id} route
+app.include_router(simulation.router, tags=["simulation"])  # No prefix - has both /api/simulation/* and /ws/simulation/{request_id} routes
+app.include_router(update.router, tags=["update"])  # No prefix - has both /api/update/* and /ws/update/status routes
+app.include_router(grid_search.router, tags=["grid_search"])  # No prefix - has both /api/grid-search/* and /ws/grid-search/{request_id} routes
+app.include_router(logs.router, tags=["logs"])  # No prefix - has both /api/logs and /ws/logs routes
 
 
 # =============================================================================
@@ -322,6 +324,16 @@ async def shutdown_tasks():
 static_dir = Path(__file__).parent.parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.get("/favicon.ico")
+def serve_favicon():
+    """Serve the favicon (browsers request this automatically)."""
+    favicon_path = static_dir / "favicon.svg"
+    if favicon_path.exists():
+        # Serve SVG as favicon.ico (browsers will accept it)
+        return Response(content=favicon_path.read_bytes(), media_type="image/svg+xml")
+    return Response(status_code=404)
 
 
 @app.get("/")

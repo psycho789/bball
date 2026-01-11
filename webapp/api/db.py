@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 _connection_pool: Optional[Queue[psycopg.Connection]] = None
 _pool_lock = threading.Lock()
 _pool_dsn: Optional[str] = None
-_pool_size = 5  # Maximum number of connections in pool
+_pool_size = 10  # Maximum number of connections in pool (increased for grid search with 8 workers)
 
 
 def _get_connection_pool() -> Queue[psycopg.Connection]:

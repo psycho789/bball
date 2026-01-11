@@ -1,15 +1,10 @@
 <div id="simulationView" style="display: none;">
     <div class="simulation-container">
-        <div class="simulation-header">
-            <div style="display: flex; align-items: center; gap: 16px;">
-                <button class="back-button" onclick="navigateToGameList()">
-                    ← Games List
-                </button>
+        <div class="page-header">
+            <div>
                 <h2>Trading Simulation</h2>
+                <p class="page-header-subtitle">Simulate trading strategies based on ESPN and Kalshi probability divergence</p>
             </div>
-            <button id="clearSimulationCacheBtn" class="clear-cache-btn" onclick="clearSimulationCache()" title="Clear simulation results cache">
-                🔄 Clear Trading Cache
-            </button>
         </div>
 
         <div class="scenario-description-compact">
@@ -58,7 +53,13 @@
                 </div>
                 <div class="sim-input-group">
                     <label>&nbsp;</label>
-                    <button id="runSimulationBtn" class="btn-primary">Run Simulation</button>
+                    <div class="sim-button-container">
+                        <button id="runSimulationBtn" class="btn-primary">Run Simulation</button>
+                        <div id="simulationLoading" class="simulation-loading-inline" style="display: none;">
+                            <div class="loading-spinner" style="width: 20px; height: 20px; margin: 0;"></div>
+                            <span id="loadingProgressText" style="font-size: 0.875rem; color: var(--text-secondary);">Running simulation...</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -73,7 +74,7 @@
                 </div>
                 <div style="display: flex; gap: 12px; align-items: center;">
                     <button id="viewToggleBtn" class="view-toggle-btn" onclick="toggleSimulationView()" title="Toggle between Simplified and Advanced views">
-                        <span id="viewToggleText">Simplified View</span>
+                        <span id="viewToggleText">Advanced View</span>
                     </button>
                     <div class="export-buttons" id="simulationExportButtons" style="display: none;">
                         <button class="export-btn" id="exportSimulationImageBtn" onclick="exportSimulationToImage()" title="Export as image (PNG)">
@@ -84,7 +85,7 @@
             </div>
             
             <!-- Simplified View -->
-            <div id="simplifiedView" class="simplified-view" style="display: none;">
+            <div id="simplifiedView" class="simplified-view">
                 <!-- Entry/Exit Conditions Section -->
                 <div class="entry-exit-conditions-section">
                     <h4>Entry/Exit Conditions</h4>
@@ -291,7 +292,7 @@
             </div>
             
             <!-- Advanced View (existing comprehensive view) -->
-            <div id="advancedView" class="advanced-view">
+            <div id="advancedView" class="advanced-view" style="display: none;">
             <div class="results-summary">
                 <div class="summary-card">
                     <div class="summary-label">Total Profit/Loss</div>
@@ -538,13 +539,6 @@
         </div>
 
         <div id="simulationError" class="error-message" style="display: none;"></div>
-        
-        <div id="simulationLoading" class="simulation-loading" style="display: none;">
-            <div class="loading">
-                <div class="loading-spinner"></div>
-                <p id="loadingProgressText">Running simulation...</p>
-            </div>
-        </div>
     </div>
 </div>
 

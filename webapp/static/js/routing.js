@@ -6,6 +6,40 @@
  * Big O: O(1) for route operations
  */
 
+/**
+ * Update active navigation link based on current route
+ */
+function updateActiveNav() {
+    const route = getRoute();
+    const navLinks = document.querySelectorAll('.nav-link[data-route]');
+    
+    navLinks.forEach(link => {
+        const linkRoute = link.getAttribute('data-route');
+        // Map route views to nav link routes
+        let activeRoute = null;
+        
+        if (route.view === 'list' || route.view === 'detail') {
+            activeRoute = 'list';
+        } else if (route.view === 'live-list' || route.view === 'live-detail') {
+            activeRoute = 'live-list';
+        } else if (route.view === 'stats') {
+            activeRoute = 'stats';
+        } else if (route.view === 'simulation') {
+            activeRoute = 'simulation';
+        } else if (route.view === 'grid-search') {
+            activeRoute = 'grid-search';
+        } else if (route.view === 'logging') {
+            activeRoute = 'logging';
+        }
+        
+        if (linkRoute === activeRoute) {
+            link.classList.add('active');
+        } else {
+            link.classList.remove('active');
+        }
+    });
+}
+
 function getRoute() {
     const hash = window.location.hash.slice(1); // Remove #
     if (hash.startsWith('/live/')) {
@@ -27,6 +61,12 @@ function getRoute() {
     }
     if (hash === '/simulation' || hash.startsWith('/simulation')) {
         return { view: 'simulation', gameId: null };
+    }
+    if (hash === '/grid-search' || hash.startsWith('/grid-search')) {
+        return { view: 'grid-search', gameId: null };
+    }
+    if (hash === '/logging' || hash.startsWith('/logging')) {
+        return { view: 'logging', gameId: null };
     }
     return { view: 'list', gameId: null };
 }
@@ -66,6 +106,16 @@ function navigateToSimulationPage() {
     showSimulationPageView();
 }
 
+function navigateToGridSearchPage() {
+    window.location.hash = '/grid-search';
+    showGridSearchPageView();
+}
+
+function navigateToLoggingPage() {
+    window.location.hash = '/logging';
+    showLoggingPageView();
+}
+
 function navigateToLiveGamesList() {
     window.location.hash = '/live';
     showLiveGamesListView();
@@ -77,6 +127,7 @@ function navigateToLiveGameDetail(gameId) {
 }
 
 async function showGameListView() {
+    updateActiveNav();
     const viewsContainer = document.getElementById('app-views');
     if (!viewsContainer) {
         console.error('app-views container not found');
@@ -165,6 +216,7 @@ async function showGameDetailView(gameId) {
 }
 
 async function showStatsPageView() {
+    updateActiveNav();
     const viewsContainer = document.getElementById('app-views');
     await renderTemplate('aggregate-stats', viewsContainer);
     
@@ -193,6 +245,7 @@ async function showStatsPageView() {
 }
 
 async function showLiveGamesListView() {
+    updateActiveNav();
     // Stop live game WebSocket if active
     if (typeof cleanupLiveGame === 'function') {
         cleanupLiveGame();
@@ -231,7 +284,52 @@ async function showLiveGamesListView() {
     });
 }
 
+async function showGridSearchPageView() {
+    updateActiveNav();
+    const viewsContainer = document.getElementById('app-views');
+    if (!viewsContainer) {
+        console.error('app-views container not found');
+        return;
+    }
+    
+    await renderTemplate('grid-search', viewsContainer);
+    
+    // Show the view
+    const gridSearchView = document.getElementById('gridSearchView');
+    if (gridSearchView) {
+        gridSearchView.style.display = 'block';
+    }
+    
+    // Initialize page after template renders
+    // Wait for script to load and DOM to be ready
+    await new Promise(resolve => {
+        // Check if script has loaded and function exists
+        const checkFunction = () => {
+            if (typeof initializeGridSearchPage === 'function') {
+                console.log('[Routing] initializeGridSearchPage function found, calling...');
+                initializeGridSearchPage();
+                resolve();
+            } else {
+                console.log('[Routing] initializeGridSearchPage not found yet, retrying...');
+                setTimeout(checkFunction, 50);
+            }
+        };
+        
+        // Start checking after a short delay to allow script to load
+        setTimeout(checkFunction, 100);
+        
+        // Timeout after 2 seconds if function never appears
+        setTimeout(() => {
+            if (typeof initializeGridSearchPage !== 'function') {
+                console.error('[Routing] initializeGridSearchPage function not found after 2 seconds');
+                resolve();
+            }
+        }, 2000);
+    });
+}
+
 async function showSimulationPageView() {
+    updateActiveNav();
     // Stop any active refresh polling from stats page
     if (typeof stopRefreshPolling === 'function') {
         stopRefreshPolling();
@@ -243,6 +341,11 @@ async function showSimulationPageView() {
     // Stop live game WebSocket if active
     if (typeof cleanupLiveGame === 'function') {
         cleanupLiveGame();
+    }
+    
+    // Stop logging auto-refresh if active
+    if (typeof cleanupLoggingPage === 'function') {
+        cleanupLoggingPage();
     }
     
     const viewsContainer = document.getElementById('app-views');
@@ -269,6 +372,49 @@ async function showSimulationPageView() {
                 // Initialize simulation page
                 if (typeof initializeSimulationPage === 'function') {
                     initializeSimulationPage();
+                }
+                resolve();
+            }, 10);
+        });
+    });
+}
+
+async function showLoggingPageView() {
+    updateActiveNav();
+    
+    // Stop any active refresh polling from stats page
+    if (typeof stopRefreshPolling === 'function') {
+        stopRefreshPolling();
+    }
+    
+    // Stop live game WebSocket if active
+    if (typeof cleanupLiveGame === 'function') {
+        cleanupLiveGame();
+    }
+    
+    const viewsContainer = document.getElementById('app-views');
+    if (!viewsContainer) {
+        console.error('app-views container not found');
+        return;
+    }
+    
+    await renderTemplate('logging', viewsContainer);
+    
+    // Show the view
+    const loggingView = document.getElementById('loggingView');
+    if (loggingView) {
+        loggingView.style.display = 'block';
+        console.log('Logging view shown');
+    } else {
+        console.error('loggingView element not found after template render');
+    }
+    
+    // Initialize page after template renders
+    await new Promise(resolve => {
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                if (typeof initializeLoggingPage === 'function') {
+                    initializeLoggingPage();
                 }
                 resolve();
             }, 10);
@@ -350,15 +496,40 @@ window.addEventListener('hashchange', async () => {
         if (typeof cleanupLiveGame === 'function') {
             cleanupLiveGame();
         }
+        // Cleanup logging when navigating to simulation
+        if (typeof cleanupLoggingPage === 'function') {
+            cleanupLoggingPage();
+        }
         await showSimulationPageView();
+    } else if (route.view === 'logging') {
+        // Cleanup live game when navigating to logging
+        if (typeof cleanupLiveGame === 'function') {
+            cleanupLiveGame();
+        }
+        await showLoggingPageView();
+    } else if (route.view === 'grid-search') {
+        // Cleanup live game when navigating to grid search
+        if (typeof cleanupLiveGame === 'function') {
+            cleanupLiveGame();
+        }
+        // Cleanup logging when navigating to grid search
+        if (typeof cleanupLoggingPage === 'function') {
+            cleanupLoggingPage();
+        }
+        await showGridSearchPageView();
     } else {
         // Cleanup live game when navigating to other views
         if (typeof cleanupLiveGame === 'function') {
             cleanupLiveGame();
         }
+        // Cleanup logging when navigating to other views
+        if (typeof cleanupLoggingPage === 'function') {
+            cleanupLoggingPage();
+        }
         await showGameListView();
     }
     
     previousRoute = route;
+    updateActiveNav();
 });
 

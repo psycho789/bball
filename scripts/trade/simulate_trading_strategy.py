@@ -871,7 +871,7 @@ def simulate_trading_strategy(
         
         # Defensive check: skip if required data is missing (shouldn't happen after filtering, but be safe)
         if espn_prob is None or kalshi_price is None or timestamp is None:
-            logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: missing required data (espn_prob={espn_prob}, kalshi_price={kalshi_price}, timestamp={timestamp})")
+            # logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: missing required data (espn_prob={espn_prob}, kalshi_price={kalshi_price}, timestamp={timestamp})")
             continue
         
         # Ensure values are floats (defensive check)
@@ -879,15 +879,15 @@ def simulate_trading_strategy(
             espn_prob = float(espn_prob)
             kalshi_price = float(kalshi_price)
         except (TypeError, ValueError) as e:
-            logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: invalid data types (espn_prob={espn_prob}, kalshi_price={kalshi_price}): {e}")
+            # logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: invalid data types (espn_prob={espn_prob}, kalshi_price={kalshi_price}): {e}")
             continue
         
         # Runtime guard: ensure values are in [0,1] range
         if espn_prob < 0.0 or espn_prob > 1.0:
-            logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: ESPN prob out of range: {espn_prob}")
+            # logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: ESPN prob out of range: {espn_prob}")
             continue
         if kalshi_price < 0.0 or kalshi_price > 1.0:
-            logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: Kalshi price out of range: {kalshi_price}")
+            # logger.warning(f"[SIMULATION] Skipping point {point_idx+1}: Kalshi price out of range: {kalshi_price}")
             continue
         
         # Set bid/ask to None if out of range (don't fail the point)
@@ -895,7 +895,7 @@ def simulate_trading_strategy(
             try:
                 kalshi_bid = float(kalshi_bid)
                 if kalshi_bid < 0.0 or kalshi_bid > 1.0:
-                    logger.warning(f"[SIMULATION] Point {point_idx+1}: Kalshi bid out of range: {kalshi_bid}, setting to None")
+                    # logger.warning(f"[SIMULATION] Point {point_idx+1}: Kalshi bid out of range: {kalshi_bid}, setting to None")
                     kalshi_bid = None
             except (TypeError, ValueError):
                 kalshi_bid = None
@@ -903,7 +903,7 @@ def simulate_trading_strategy(
             try:
                 kalshi_ask = float(kalshi_ask)
                 if kalshi_ask < 0.0 or kalshi_ask > 1.0:
-                    logger.warning(f"[SIMULATION] Point {point_idx+1}: Kalshi ask out of range: {kalshi_ask}, setting to None")
+                    # logger.warning(f"[SIMULATION] Point {point_idx+1}: Kalshi ask out of range: {kalshi_ask}, setting to None")
                     kalshi_ask = None
             except (TypeError, ValueError):
                 kalshi_ask = None
@@ -931,9 +931,9 @@ def simulate_trading_strategy(
                         state.entry_kalshi_ask = kalshi_ask
                         state.entry_timestamp = timestamp
                         successful_entries += 1
-                        logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✓ ENTERED LONG - Divergence: {divergence_prob*100:.2f} cents (ESPN: {espn_prob*100:.1f}%, Kalshi: {kalshi_price*100:.1f}%)")
+                        # logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✓ ENTERED LONG - Divergence: {divergence_prob*100:.2f} cents (ESPN: {espn_prob*100:.1f}%, Kalshi: {kalshi_price*100:.1f}%)")
                     else:
-                        entry_failed_bid_ask_long += 1
+                        # entry_failed_bid_ask_long += 1
                         logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✗ Entry failed (LONG) - Divergence sufficient ({divergence_prob*100:.2f} cents) but missing kalshi_ask")
             elif divergence_prob > 0:
                 entry_failed_divergence_long += 1
@@ -955,10 +955,10 @@ def simulate_trading_strategy(
                         state.entry_kalshi_bid = kalshi_bid
                         state.entry_timestamp = timestamp
                         successful_entries += 1
-                        logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✓ ENTERED SHORT - Divergence: {divergence_prob*100:.2f} cents (ESPN: {espn_prob*100:.1f}%, Kalshi: {kalshi_price*100:.1f}%)")
+                        # logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✓ ENTERED SHORT - Divergence: {divergence_prob*100:.2f} cents (ESPN: {espn_prob*100:.1f}%, Kalshi: {kalshi_price*100:.1f}%)")
                     else:
                         entry_failed_bid_ask_short += 1
-                        logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✗ Entry failed (SHORT) - Divergence sufficient ({divergence_prob*100:.2f} cents) but missing kalshi_bid")
+                        # logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✗ Entry failed (SHORT) - Divergence sufficient ({divergence_prob*100:.2f} cents) but missing kalshi_bid")
             elif divergence_prob < 0:
                 entry_failed_divergence_short += 1
         
@@ -1038,7 +1038,7 @@ def simulate_trading_strategy(
                     successful_exits += 1
                     gross_profit_dollars = trade.profit_cents / 100.0
                     net_profit_dollars = trade.net_profit_cents / 100.0
-                    logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✓ EXITED {state.open_position.upper()} - Divergence converged to {abs_divergence_prob*100:.2f} cents, Gross: ${gross_profit_dollars:.2f}, Net: ${net_profit_dollars:.2f}")
+                    # logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: ✓ EXITED {state.open_position.upper()} - Divergence converged to {abs_divergence_prob*100:.2f} cents, Gross: ${gross_profit_dollars:.2f}, Net: ${net_profit_dollars:.2f}")
                     
                     # Reset state
                     state.open_position = None
@@ -1047,8 +1047,8 @@ def simulate_trading_strategy(
                     state.entry_kalshi_bid = None
                     state.entry_kalshi_ask = None
                     state.entry_timestamp = None
-            else:
-                logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: Position open ({state.open_position}), divergence: {abs_divergence_prob*100:.2f} cents (need <{exit_threshold*100:.1f} to exit)")
+            # else:
+            #     logger.debug(f"[SIMULATION] Point {point_idx+1}/{len(aligned_data)}: Position open ({state.open_position}), divergence: {abs_divergence_prob*100:.2f} cents (need <{exit_threshold*100:.1f} to exit)")
         
         # Update previous divergence values for hysteresis and direction confirmation
         state.prev_divergence_prob = divergence_prob
@@ -1123,25 +1123,25 @@ def simulate_trading_strategy(
         state.trades.append(trade)
         gross_profit_dollars = trade.profit_cents / 100.0
         net_profit_dollars = trade.net_profit_cents / 100.0
-        logger.debug(f"[SIMULATION] End of game: Closed remaining {state.open_position.upper()} position - Final divergence: {final_divergence*100:.2f} cents, Gross: ${gross_profit_dollars:.2f}, Net: ${net_profit_dollars:.2f} (using final market price, not binary settlement)")
+        # logger.debug(f"[SIMULATION] End of game: Closed remaining {state.open_position.upper()} position - Final divergence: {final_divergence*100:.2f} cents, Gross: ${gross_profit_dollars:.2f}, Net: ${net_profit_dollars:.2f} (using final market price, not binary settlement)")
     
     # Log summary statistics
-    logger.debug(f"[SIMULATION] Simulation complete - Total trades: {len(state.trades)}")
+    # logger.debug(f"[SIMULATION] Simulation complete - Total trades: {len(state.trades)}")
     if len(state.trades) == 0:
         logger.warning(f"[SIMULATION] ❌ No trades executed - Summary:")
         logger.warning(f"[SIMULATION]   - Entry attempts (LONG): {entry_attempts_long} (failed divergence: {entry_failed_divergence_long}, failed bid/ask: {entry_failed_bid_ask_long})")
         logger.warning(f"[SIMULATION]   - Entry attempts (SHORT): {entry_attempts_short} (failed divergence: {entry_failed_divergence_short}, failed bid/ask: {entry_failed_bid_ask_short})")
         logger.warning(f"[SIMULATION]   - Successful entries: {successful_entries}")
-        if entry_attempts_long == 0 and entry_attempts_short == 0:
-            logger.warning(f"[SIMULATION]   - Reason: Divergence never exceeds entry threshold ({entry_threshold*100:.1f} cents)")
-        elif entry_failed_bid_ask_long > 0 or entry_failed_bid_ask_short > 0:
-            logger.warning(f"[SIMULATION]   - Reason: Missing bid/ask data when divergence was sufficient")
-        else:
-            logger.warning(f"[SIMULATION]   - Reason: Divergence never exceeds entry threshold")
+        # if entry_attempts_long == 0 and entry_attempts_short == 0:
+        #     logger.warning(f"[SIMULATION]   - Reason: Divergence never exceeds entry threshold ({entry_threshold*100:.1f} cents)")
+        # elif entry_failed_bid_ask_long > 0 or entry_failed_bid_ask_short > 0:
+        #     logger.warning(f"[SIMULATION]   - Reason: Missing bid/ask data when divergence was sufficient")
+        # else:
+        #     logger.warning(f"[SIMULATION]   - Reason: Divergence never exceeds entry threshold")
     else:
         logger.debug(f"[SIMULATION] ✓ Successfully executed {len(state.trades)} trades")
-        logger.debug(f"[SIMULATION]   - Entry attempts (LONG): {entry_attempts_long}, (SHORT): {entry_attempts_short}")
-        logger.debug(f"[SIMULATION]   - Successful entries: {successful_entries}, Successful exits: {successful_exits}")
+        # logger.debug(f"[SIMULATION]   - Entry attempts (LONG): {entry_attempts_long}, (SHORT): {entry_attempts_short}")
+        # logger.debug(f"[SIMULATION]   - Successful entries: {successful_entries}, Successful exits: {successful_exits}")
     
     # Calculate summary statistics using net profit (after costs)
     # Note: profit_cents is gross profit, net_profit_cents is net profit after costs

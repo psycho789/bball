@@ -19,18 +19,33 @@ DEBUG_MODE = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes", "o
 LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
-def setup_logging(debug: Optional[bool] = None) -> logging.Logger:
+# Track if logging has been initialized in this session
+_logging_initialized = False
+
+def setup_logging(debug: Optional[bool] = None, overwrite_log_file: Optional[bool] = None) -> logging.Logger:
     """
     Set up logging configuration for the application.
     
     Args:
         debug: Override debug mode (if None, uses DEBUG environment variable)
+        overwrite_log_file: If True, overwrite the log file on first initialization.
+                           If None, defaults to True on first call, False on subsequent calls.
     
     Returns:
         Configured logger instance
     """
+    global _logging_initialized
+    
     if debug is None:
         debug = DEBUG_MODE
+    
+    # Determine if we should overwrite the log file
+    # Overwrite on first initialization, or if explicitly requested
+    should_overwrite = False
+    if overwrite_log_file is True:
+        should_overwrite = True
+    elif overwrite_log_file is None and not _logging_initialized:
+        should_overwrite = True
     
     # Create logger
     logger = logging.getLogger("winprob_api")
@@ -62,10 +77,16 @@ def setup_logging(debug: Optional[bool] = None) -> logging.Logger:
     
     # Add file handler for persistent logging
     log_file = LOG_DIR / "winprob_api.log"
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    
+    # Create file handler
+    # Use mode='w' to overwrite on app restart, mode='a' to append otherwise
+    file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='w' if should_overwrite else 'a')
     file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
+    
+    # Mark logging as initialized
+    _logging_initialized = True
     
     if debug:
         logger.debug(f"Logging to file: {log_file}")

@@ -1,12 +1,10 @@
 <!-- Game List View -->
 <section class="game-list-view" id="gameListView" style="display: block;">
-    <!-- Update Button -->
-    <div class="update-controls">
-        <button id="updateDataBtn" class="update-btn">
-            <span class="update-btn-text">Update Data</span>
-            <span id="newGamesBadge" class="new-games-badge" style="display: none;">0</span>
-        </button>
-        <span id="updateStatus" class="update-status"></span>
+    <div class="page-header">
+        <div>
+            <h2>Games</h2>
+            <p class="page-header-subtitle">Browse and analyze NBA games with ESPN and Kalshi probability data</p>
+        </div>
     </div>
     
     <!-- Filters and Sorting Controls -->
@@ -31,17 +29,10 @@
         </div>
         
         <div class="filter-group">
-            <label for="hasKalshi">Kalshi:</label>
-            <select id="hasKalshi">
-                <option value="">All Games</option>
-                <option value="true">With Kalshi</option>
-                <option value="false">Without Kalshi</option>
-            </select>
-        </div>
-        
-        <div class="filter-group">
             <label for="teamFilter">Team:</label>
-            <input type="text" id="teamFilter" placeholder="Team abbrev">
+            <select id="teamFilter">
+                <option value="">All Teams</option>
+            </select>
         </div>
         
         <div class="filter-group">

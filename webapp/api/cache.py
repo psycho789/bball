@@ -110,6 +110,16 @@ class SimpleCache:
         if not cache_path:
             return
         
+        # Check if Python is shutting down (sys.meta_path becomes None during shutdown)
+        try:
+            import sys
+            if sys.meta_path is None:
+                # Python is shutting down, skip saving silently
+                return
+        except (AttributeError, RuntimeError):
+            # sys might not be available or in inconsistent state during shutdown
+            return
+        
         try:
             # Only save non-expired entries
             current_time = time.time()
@@ -125,7 +135,18 @@ class SimpleCache:
             
             if DEBUG_MODE:
                 logger.debug(f"Saved {len(valid_cache)} cache entries to {cache_path.name}")
-        except Exception as e:
+        except (Exception, RuntimeError, AttributeError) as e:
+            # Silently ignore errors during Python shutdown
+            # Check if Python is shutting down by checking sys.meta_path
+            try:
+                import sys
+                if sys.meta_path is None:
+                    # Python is shutting down, don't log warning
+                    return
+            except (AttributeError, RuntimeError):
+                # sys might not be available, assume shutdown
+                return
+            # Only log warning if not shutting down
             logger.warning(f"Failed to save cache to {cache_path}: {e}")
     
     def get(self, key: str, data_version: Optional[Any] = None) -> Optional[Any]:

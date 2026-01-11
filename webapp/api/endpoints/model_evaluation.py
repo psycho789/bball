@@ -20,7 +20,8 @@ logger = get_logger(__name__)
 @router.get("/stats/model-evaluation")
 def get_model_evaluation(
     artifact_path: Optional[str] = Query(None, description="Path to artifact file (relative to repo root)"),
-    season_start: int = Query(2024, description="Season start year to evaluate"),
+    season_start: Optional[int] = Query(None, description="Season start year to evaluate (None = aggregate all seasons)"),
+    all_seasons: bool = Query(False, description="Aggregate calibration data from all available evaluation reports"),
 ) -> dict[str, Any]:
     """
     Get model evaluation results including calibration charts.
@@ -32,9 +33,100 @@ def get_model_evaluation(
     """
     # Resolve repo root: webapp/api/endpoints/model_evaluation.py -> repo root
     repo_root = Path(__file__).parent.parent.parent.parent.resolve()
+    reports_dir = repo_root / "data" / "reports"
     
-    # Try to find evaluation report
-    eval_report_path = repo_root / "data" / "reports" / f"winprob_eval_{season_start}.json"
+    # If all_seasons=True, aggregate all evaluation reports
+    if all_seasons or season_start is None:
+        eval_files = list(reports_dir.glob("winprob_eval_*.json"))
+        # Filter out smoke test files
+        eval_files = [f for f in eval_files if "smoke" not in f.name]
+        
+        if not eval_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No evaluation reports found in {reports_dir}. Run evaluation script first."
+            )
+        
+        # Aggregate calibration data from all reports
+        all_calibration_points = []
+        all_calibration_bins = []
+        total_n = 0
+        artifact_paths = set()
+        artifact_metas = []
+        
+        for eval_file in sorted(eval_files):
+            try:
+                with open(eval_file, 'r') as f:
+                    eval_data = json.load(f)
+                
+                artifact_paths.add(eval_data.get("artifact_path", ""))
+                artifact_metas.append(eval_data.get("artifact_meta", {}))
+                
+                bins = eval_data.get("eval", {}).get("calibration_bins", [])
+                for bin_data in bins:
+                    avg_p = bin_data.get("avg_p", 0)
+                    obs_rate = bin_data.get("obs_rate", 0)
+                    n = bin_data.get("n", 0)
+                    if n > 0:
+                        all_calibration_points.append({
+                            "x": avg_p,
+                            "y": obs_rate,
+                            "n": n,
+                            "gap": bin_data.get("gap", 0),
+                            "season": eval_data.get("eval", {}).get("season_start"),
+                        })
+                        all_calibration_bins.append(bin_data)
+                        total_n += n
+            except Exception as e:
+                logger.warning(f"Failed to read evaluation report {eval_file}: {e}")
+                continue
+        
+        if not all_calibration_points:
+            raise HTTPException(
+                status_code=404,
+                detail="No calibration data found in evaluation reports."
+            )
+        
+        # Aggregate by bin (average probabilities and observed rates weighted by sample count)
+        bin_map = {}
+        for point in all_calibration_points:
+            # Round to nearest 0.05 to group bins
+            bin_key = round(point["x"] * 20) / 20
+            if bin_key not in bin_map:
+                bin_map[bin_key] = {"x_sum": 0, "y_sum": 0, "n_sum": 0, "gaps": []}
+            bin_map[bin_key]["x_sum"] += point["x"] * point["n"]
+            bin_map[bin_key]["y_sum"] += point["y"] * point["n"]
+            bin_map[bin_key]["n_sum"] += point["n"]
+            bin_map[bin_key]["gaps"].append(point["gap"])
+        
+        # Create aggregated calibration points
+        aggregated_points = []
+        for bin_key in sorted(bin_map.keys()):
+            data = bin_map[bin_key]
+            if data["n_sum"] > 0:
+                avg_x = data["x_sum"] / data["n_sum"]
+                avg_y = data["y_sum"] / data["n_sum"]
+                avg_gap = sum(data["gaps"]) / len(data["gaps"]) if data["gaps"] else 0
+                aggregated_points.append({
+                    "x": avg_x,
+                    "y": avg_y,
+                    "n": data["n_sum"],
+                    "gap": avg_gap,
+                })
+        
+        return {
+            "artifact_path": ", ".join(sorted(artifact_paths)) if artifact_paths else "",
+            "artifact_meta": artifact_metas[0] if artifact_metas else {},
+            "eval": {
+                "season_start": None,  # All seasons
+                "overall": {"n": total_n},
+                "calibration_bins": all_calibration_bins,
+                "calibration_points": aggregated_points,
+            },
+        }
+    
+    # Single season evaluation
+    eval_report_path = reports_dir / f"winprob_eval_{season_start}.json"
     
     if not eval_report_path.exists():
         # Try default artifact path if provided

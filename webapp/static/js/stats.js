@@ -16,16 +16,20 @@ async function loadAggregateStats() {
     
     try {
         console.log('[FRONTEND] Fetching aggregate stats...');
-        const [stats, modelEval] = await Promise.allSettled([
+        const [stats, modelEval2024, modelEvalAll] = await Promise.allSettled([
             getAggregateStats('2025-26'),
-            getModelEvaluation(2024).catch(() => null)  // Don't fail if evaluation not available
+            getModelEvaluation(2024).catch(() => null),  // Don't fail if evaluation not available
+            getModelEvaluation(null, true).catch(() => null)  // All seasons
         ]);
         
         const statsData = stats.status === 'fulfilled' ? stats.value : null;
-        const evalData = modelEval.status === 'fulfilled' ? modelEval.value : null;
+        // Extract evalData - use value directly if fulfilled, otherwise null
+        const evalData2024 = modelEval2024.status === 'fulfilled' ? modelEval2024.value : null;
+        const evalDataAll = modelEvalAll.status === 'fulfilled' ? modelEvalAll.value : null;
         
         console.log('[FRONTEND] Stats received, rendering...');
-        renderAggregateStats(statsData, evalData);
+        // Pass both 2024 and all-seasons evaluation data
+        renderAggregateStats(statsData, evalData2024, evalDataAll);
     } catch (error) {
         console.error('[FRONTEND] Failed to load aggregate stats:', error);
         container.innerHTML = `
@@ -152,7 +156,7 @@ function renderChart(canvasId, chartType, chartData, options = {}) {
     return new Chart(ctx, config);
 }
 
-function renderAggregateStats(stats, modelEval = null) {
+function renderAggregateStats(stats, modelEval2024 = null, modelEvalAll = null) {
     const container = document.getElementById('aggregateStatsContainer');
     if (!container || !stats) return;
     
@@ -188,6 +192,27 @@ function renderAggregateStats(stats, modelEval = null) {
         <div class="chart-container">
             <h4>Distribution Charts${createTooltip('These charts show how different metrics are spread across all games. They help us see patterns - like whether most games have similar accuracy, or if there are outliers.')}</h4>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px;">
+                <!-- Model Calibration Charts -->
+                ${modelEval2024 && modelEval2024.eval && modelEval2024.eval.calibration_points && modelEval2024.eval.calibration_points.length > 0 ? `
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px;">
+                        Win Probability Model Calibration (2024 Season)${createTooltip('Shows how well-calibrated the trained win probability model is on the 2024 season test set. Each point represents a probability bin. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated.')}
+                    </h5>
+                    <div class="chart-wrapper">
+                        <canvas id="modelCalibrationChart2024"></canvas>
+                    </div>
+                </div>
+                ` : ''}
+                ${modelEvalAll && modelEvalAll.eval && modelEvalAll.eval.calibration_points && modelEvalAll.eval.calibration_points.length > 0 ? `
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px;">
+                        Win Probability Model Calibration (All Seasons)${createTooltip('Shows how well-calibrated the trained win probability model is across all available seasons. Each point represents a probability bin aggregated across all evaluation reports. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated.')}
+                    </h5>
+                    <div class="chart-wrapper">
+                        <canvas id="modelCalibrationChartAll"></canvas>
+                    </div>
+                </div>
+                ` : ''}
                 <!-- Story 3.1: Reliability Curves -->
                 ${stats.espn?.reliability_curve?.bins && stats.espn.reliability_curve.bins.length > 0 ? `
                 <div>
@@ -228,17 +253,6 @@ function renderAggregateStats(stats, modelEval = null) {
                     </h5>
                     <div class="chart-wrapper">
                         <canvas id="disagreementOutcomeChart"></canvas>
-                    </div>
-                </div>
-                ` : ''}
-                <!-- Model Calibration Chart -->
-                ${modelEval?.eval?.calibration_points && modelEval.eval.calibration_points.length > 0 ? `
-                <div>
-                    <h5 style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px;">
-                        Win Probability Model Calibration (2024 Season)${createTooltip('Shows how well-calibrated the trained win probability model is. Each point represents a probability bin. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated. Points above the diagonal = underconfident (actual win rate higher than predicted). Points below the diagonal = overconfident (predicted probability higher than actual outcome).')}
-                    </h5>
-                    <div class="chart-wrapper">
-                        <canvas id="modelCalibrationChart"></canvas>
                     </div>
                 </div>
                 ` : ''}
@@ -984,24 +998,108 @@ function renderAggregateStats(stats, modelEval = null) {
             });
         }
         
-        // Model Calibration Chart
-        if (modelEval?.eval?.calibration_points && modelEval.eval.calibration_points.length > 0) {
-            const calibrationPoints = modelEval.eval.calibration_points;
+        // Model Calibration Chart - 2024 Season
+        if (modelEval2024 && modelEval2024.eval && modelEval2024.eval.calibration_points && modelEval2024.eval.calibration_points.length > 0) {
+            console.log('[FRONTEND] Rendering model calibration chart (2024) with', modelEval2024.eval.calibration_points.length, 'points');
+            const calibrationPoints = modelEval2024.eval.calibration_points;
             const minVal = 0;
             const maxVal = 1;
             
-            renderChart('modelCalibrationChart', 'scatter', {
+            renderChart('modelCalibrationChart2024', 'scatter', {
                 datasets: [
                     {
                         label: 'Model Calibration',
                         data: calibrationPoints.map(p => ({ x: p.x, y: p.y, n: p.n, gap: p.gap })),
                         backgroundColor: 'rgba(124, 58, 237, 0.6)',
                         borderColor: '#7c3aed',
-                        pointRadius: (ctx) => {
+                        pointRadius: calibrationPoints.map(p => {
                             // Size points by sample count
-                            const n = ctx.raw.n || 0;
+                            const n = p.n || 0;
                             return Math.max(3, Math.min(10, 3 + (n / 10000)));
-                        },
+                        }),
+                        pointHoverRadius: 8
+                    },
+                    {
+                        label: 'Perfect Calibration (y = x)',
+                        data: [
+                            { x: minVal, y: minVal },
+                            { x: maxVal, y: maxVal }
+                        ],
+                        type: 'line',
+                        borderColor: 'rgba(255, 255, 255, 0.5)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0
+                    }
+                ]
+            }, {
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Predicted Probability', color: '#888899' },
+                        min: 0,
+                        max: 1,
+                        ticks: { color: '#888899' },
+                        grid: { color: '#2a2a40' }
+                    },
+                    y: {
+                        title: { display: true, text: 'Actual Win Rate', color: '#888899' },
+                        min: 0,
+                        max: 1,
+                        ticks: { color: '#888899' },
+                        grid: { color: '#2a2a40' }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                if (context.datasetIndex === 0) {
+                                    const point = context.raw;
+                                    const gap = point.gap || 0;
+                                    const gapText = gap > 0 ? `+${(gap * 100).toFixed(2)}%` : `${(gap * 100).toFixed(2)}%`;
+                                    return [
+                                        `Predicted: ${(point.x * 100).toFixed(1)}%`,
+                                        `Actual: ${(point.y * 100).toFixed(1)}%`,
+                                        `Gap: ${gapText}`,
+                                        `Samples: ${point.n || 0}`
+                                    ];
+                                }
+                                return context.dataset.label;
+                            }
+                        }
+                    },
+                    legend: {
+                        display: true,
+                        labels: {
+                            color: '#888899',
+                            filter: (item) => item.text !== 'Perfect Calibration (y = x)'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Model Calibration Chart - All Seasons
+        if (modelEvalAll && modelEvalAll.eval && modelEvalAll.eval.calibration_points && modelEvalAll.eval.calibration_points.length > 0) {
+            console.log('[FRONTEND] Rendering model calibration chart (all seasons) with', modelEvalAll.eval.calibration_points.length, 'points');
+            const calibrationPoints = modelEvalAll.eval.calibration_points;
+            const minVal = 0;
+            const maxVal = 1;
+            
+            renderChart('modelCalibrationChartAll', 'scatter', {
+                datasets: [
+                    {
+                        label: 'Model Calibration (All Seasons)',
+                        data: calibrationPoints.map(p => ({ x: p.x, y: p.y, n: p.n, gap: p.gap })),
+                        backgroundColor: 'rgba(124, 58, 237, 0.6)',
+                        borderColor: '#7c3aed',
+                        pointRadius: calibrationPoints.map(p => {
+                            // Size points by sample count
+                            const n = p.n || 0;
+                            return Math.max(3, Math.min(10, 3 + (n / 10000)));
+                        }),
                         pointHoverRadius: 8
                     },
                     {
@@ -1193,12 +1291,16 @@ function renderAggregateStats(stats, modelEval = null) {
 
 // Store current stats data for export
 let currentStatsData = null;
+let currentModelEval2024 = null;
+let currentModelEvalAll = null;
 
 // Wrap renderAggregateStats to store data
 const originalRenderAggregateStats = renderAggregateStats;
-renderAggregateStats = function(stats) {
+renderAggregateStats = function(stats, modelEval2024, modelEvalAll) {
     currentStatsData = stats;
-    return originalRenderAggregateStats(stats);
+    currentModelEval2024 = modelEval2024;
+    currentModelEvalAll = modelEvalAll;
+    return originalRenderAggregateStats(stats, modelEval2024, modelEvalAll);
 };
 
 // HTML Export Function
@@ -1251,6 +1353,8 @@ ${cssContent}
     <script>
         // Embedded data
         const statsData = ${JSON.stringify(currentStatsData, null, 2)};
+        const modelEval2024 = ${JSON.stringify(currentModelEval2024, null, 2)};
+        const modelEvalAll = ${JSON.stringify(currentModelEvalAll, null, 2)};
         
         // Chart rendering helper functions
         function createHistogram(data, label, color, bins = 30) {
@@ -1574,6 +1678,168 @@ ${cssContent}
                                         const bin = bins[context.dataIndex];
                                         return \`Range: [\${bin.bin_min.toFixed(2)}, \${bin.bin_max.toFixed(2)})\`;
                                     }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Model Calibration Chart - 2024 Season
+                if (modelEval2024 && modelEval2024.eval && modelEval2024.eval.calibration_points && modelEval2024.eval.calibration_points.length > 0) {
+                    const calibrationPoints = modelEval2024.eval.calibration_points;
+                    const minVal = 0;
+                    const maxVal = 1;
+                    
+                    renderChart('modelCalibrationChart2024', 'scatter', {
+                        datasets: [
+                            {
+                                label: 'Model Calibration',
+                                data: calibrationPoints.map(p => ({ x: p.x, y: p.y, n: p.n, gap: p.gap })),
+                                backgroundColor: 'rgba(124, 58, 237, 0.6)',
+                                borderColor: '#7c3aed',
+                                pointRadius: calibrationPoints.map(p => {
+                                    const n = p.n || 0;
+                                    return Math.max(3, Math.min(10, 3 + (n / 10000)));
+                                }),
+                                pointHoverRadius: 8
+                            },
+                            {
+                                label: 'Perfect Calibration (y = x)',
+                                data: [
+                                    { x: minVal, y: minVal },
+                                    { x: maxVal, y: maxVal }
+                                ],
+                                type: 'line',
+                                borderColor: 'rgba(255, 255, 255, 0.5)',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                pointRadius: 0,
+                                fill: false,
+                                tension: 0
+                            }
+                        ]
+                    }, {
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Predicted Probability', color: '#888899' },
+                                min: 0,
+                                max: 1,
+                                ticks: { color: '#888899' },
+                                grid: { color: '#2a2a40' }
+                            },
+                            y: {
+                                title: { display: true, text: 'Actual Win Rate', color: '#888899' },
+                                min: 0,
+                                max: 1,
+                                ticks: { color: '#888899' },
+                                grid: { color: '#2a2a40' }
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        if (context.datasetIndex === 0) {
+                                            const point = context.raw;
+                                            const gap = point.gap || 0;
+                                            const gapText = gap > 0 ? \`+\${(gap * 100).toFixed(2)}%\` : \`\${(gap * 100).toFixed(2)}%\`;
+                                            return [
+                                                \`Predicted: \${(point.x * 100).toFixed(1)}%\`,
+                                                \`Actual: \${(point.y * 100).toFixed(1)}%\`,
+                                                \`Gap: \${gapText}\`,
+                                                \`Samples: \${point.n || 0}\`
+                                            ];
+                                        }
+                                        return context.dataset.label;
+                                    }
+                                }
+                            },
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: '#888899',
+                                    filter: (item) => item.text !== 'Perfect Calibration (y = x)'
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Model Calibration Chart - All Seasons
+                if (modelEvalAll && modelEvalAll.eval && modelEvalAll.eval.calibration_points && modelEvalAll.eval.calibration_points.length > 0) {
+                    const calibrationPoints = modelEvalAll.eval.calibration_points;
+                    const minVal = 0;
+                    const maxVal = 1;
+                    
+                    renderChart('modelCalibrationChartAll', 'scatter', {
+                        datasets: [
+                            {
+                                label: 'Model Calibration (All Seasons)',
+                                data: calibrationPoints.map(p => ({ x: p.x, y: p.y, n: p.n, gap: p.gap })),
+                                backgroundColor: 'rgba(124, 58, 237, 0.6)',
+                                borderColor: '#7c3aed',
+                                pointRadius: calibrationPoints.map(p => {
+                                    const n = p.n || 0;
+                                    return Math.max(3, Math.min(10, 3 + (n / 10000)));
+                                }),
+                                pointHoverRadius: 8
+                            },
+                            {
+                                label: 'Perfect Calibration (y = x)',
+                                data: [
+                                    { x: minVal, y: minVal },
+                                    { x: maxVal, y: maxVal }
+                                ],
+                                type: 'line',
+                                borderColor: 'rgba(255, 255, 255, 0.5)',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                pointRadius: 0,
+                                fill: false,
+                                tension: 0
+                            }
+                        ]
+                    }, {
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Predicted Probability', color: '#888899' },
+                                min: 0,
+                                max: 1,
+                                ticks: { color: '#888899' },
+                                grid: { color: '#2a2a40' }
+                            },
+                            y: {
+                                title: { display: true, text: 'Actual Win Rate', color: '#888899' },
+                                min: 0,
+                                max: 1,
+                                ticks: { color: '#888899' },
+                                grid: { color: '#2a2a40' }
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        if (context.datasetIndex === 0) {
+                                            const point = context.raw;
+                                            const gap = point.gap || 0;
+                                            const gapText = gap > 0 ? \`+\${(gap * 100).toFixed(2)}%\` : \`\${(gap * 100).toFixed(2)}%\`;
+                                            return [
+                                                \`Predicted: \${(point.x * 100).toFixed(1)}%\`,
+                                                \`Actual: \${(point.y * 100).toFixed(1)}%\`,
+                                                \`Gap: \${gapText}\`,
+                                                \`Samples: \${point.n || 0}\`
+                                            ];
+                                        }
+                                        return context.dataset.label;
+                                    }
+                                }
+                            },
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: '#888899',
+                                    filter: (item) => item.text !== 'Perfect Calibration (y = x)'
                                 }
                             }
                         }

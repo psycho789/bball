@@ -1,0 +1,236 @@
+<div id="gridSearchView" style="display: none;">
+    <div class="simulation-container">
+        <div class="page-header">
+            <div>
+                <h2>Grid Search Hyperparameter Optimization</h2>
+                <p class="page-header-subtitle">Systematically test entry/exit threshold combinations to find optimal trading strategy parameters</p>
+            </div>
+        </div>
+
+        <!-- Loading Indicator - Sticky overlay -->
+        <div id="gridSearchLoading" class="grid-search-loading-overlay" style="display: none;">
+            <div class="grid-search-loading-content">
+                <div class="loading-spinner"></div>
+                <div class="grid-search-loading-text">
+                    <span id="loadingProgressText">Running grid search...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="simulation-controls-compact">
+            <form id="gridSearchForm">
+                <div class="grid-search-form-container">
+                    <!-- Basic Settings -->
+                    <div class="grid-search-basic">
+                        <div class="grid-search-basic-grid">
+                            <!-- Season -->
+                            <div class="sim-input-group">
+                                <label for="season">Season:</label>
+                                <select id="season" required>
+                                    <option value="">Loading seasons...</option>
+                                </select>
+                                <span id="seasonError" class="error-message" style="display: none;"></span>
+                            </div>
+
+                            <!-- Entry Threshold Range -->
+                            <fieldset class="range-fieldset">
+                                <legend>Entry Threshold Range</legend>
+                                <div class="range-grid">
+                                    <div class="sim-input-group">
+                                        <label for="entryMin">Min:</label>
+                                        <input type="number" id="entryMin" value="0.02" min="0.001" max="1.0" step="0.001" required />
+                                    </div>
+                                    <div class="sim-input-group">
+                                        <label for="entryMax">Max:</label>
+                                        <input type="number" id="entryMax" value="0.10" min="0.001" max="1.0" step="0.001" required />
+                                    </div>
+                                    <div class="sim-input-group">
+                                        <label for="entryStep">Step:</label>
+                                        <input type="number" id="entryStep" value="0.01" min="0.001" max="0.1" step="0.001" required />
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <!-- Exit Threshold Range -->
+                            <fieldset class="range-fieldset">
+                                <legend>Exit Threshold Range</legend>
+                                <div class="range-grid">
+                                    <div class="sim-input-group">
+                                        <label for="exitMin">Min:</label>
+                                        <input type="number" id="exitMin" value="0.00" min="0.0" max="1.0" step="0.001" required />
+                                    </div>
+                                    <div class="sim-input-group">
+                                        <label for="exitMax">Max:</label>
+                                        <input type="number" id="exitMax" value="0.05" min="0.0" max="1.0" step="0.001" required />
+                                    </div>
+                                    <div class="sim-input-group">
+                                        <label for="exitStep">Step:</label>
+                                        <input type="number" id="exitStep" value="0.005" min="0.001" max="0.1" step="0.001" required />
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <!-- Bet Amount + Submit Button Group -->
+                            <div class="grid-search-action-group">
+                                <div class="sim-input-group">
+                                    <label for="betAmount">Bet Amount ($):</label>
+                                    <input type="number" id="betAmount" value="20.0" min="1" max="1000" step="0.1" required />
+                                </div>
+                                <div class="grid-search-submit-wrapper">
+                                    <button type="submit" id="runGridSearchBtn" class="btn-primary" disabled>Run Grid Search</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Settings -->
+                    <details class="grid-search-advanced">
+                        <summary>Advanced Settings</summary>
+                        <div class="grid-search-advanced-grid">
+                        <!-- Trading Parameters -->
+                        <div class="sim-input-group">
+                            <label for="slippageRate">Slippage Rate:</label>
+                            <input type="number" id="slippageRate" value="0.0" min="0.0" max="0.1" step="0.0001" required />
+                        </div>
+
+                        <!-- Data Filtering -->
+                        <div class="sim-input-group">
+                            <label for="excludeFirstSeconds">Exclude First (seconds):</label>
+                            <input type="number" id="excludeFirstSeconds" value="60" min="0" max="600" step="1" required />
+                        </div>
+                        <div class="sim-input-group">
+                            <label for="excludeLastSeconds">Exclude Last (seconds):</label>
+                            <input type="number" id="excludeLastSeconds" value="60" min="0" max="600" step="1" required />
+                        </div>
+
+                        <!-- Data Split -->
+                        <div class="sim-input-group">
+                            <label for="trainRatio">Train Ratio:</label>
+                            <input type="number" id="trainRatio" value="0.70" min="0.0" max="1.0" step="0.01" required />
+                        </div>
+                        <div class="sim-input-group">
+                            <label for="validRatio">Valid Ratio:</label>
+                            <input type="number" id="validRatio" value="0.15" min="0.0" max="1.0" step="0.01" required />
+                        </div>
+                        <div class="sim-input-group">
+                            <label for="testRatio">Test Ratio:</label>
+                            <input type="number" id="testRatio" value="0.15" min="0.0" max="1.0" step="0.01" required />
+                        </div>
+                        <div class="sim-input-group grid-search-error-wrapper">
+                            <span id="splitRatioError" class="error-message" style="display: none;"></span>
+                        </div>
+
+                        <!-- Selection Criteria -->
+                        <div class="sim-input-group">
+                            <label for="topN">Top N:</label>
+                            <input type="number" id="topN" value="10" min="1" max="100" step="1" required />
+                        </div>
+                        <div class="sim-input-group">
+                            <label for="minTradeCount">Min Trade Count:</label>
+                            <input type="number" id="minTradeCount" value="200" min="1" max="10000" step="1" required />
+                        </div>
+
+                        <!-- Flags -->
+                        <div class="sim-input-group checkbox-field">
+                            <label for="enableFees" class="checkbox-label">
+                                <input type="checkbox" id="enableFees" checked />
+                                Enable Fees
+                            </label>
+                        </div>
+                        <div class="sim-input-group checkbox-field">
+                            <label for="useTradeData" class="checkbox-label">
+                                <input type="checkbox" id="useTradeData" checked />
+                                Use Trade Data
+                            </label>
+                        </div>
+                        </div>
+                    </details>
+                </div>
+            </form>
+        </div>
+
+        <!-- Results Section -->
+        <div id="gridSearchResults" class="simulation-results" style="display: none;">
+            <div class="results-header">
+                <h3>Grid Search Results</h3>
+                <div class="export-buttons" id="gridSearchExportButtons" style="display: none;">
+                    <button class="export-btn" id="exportGridSearchImageBtn" onclick="exportGridSearchToImage()" title="Export as image (PNG)">
+                        🖼️ Export Image
+                    </button>
+                </div>
+            </div>
+
+            <!-- Final Selection -->
+            <div id="finalSelection" class="results-section" style="display: none;">
+                <h4>Best Combination</h4>
+                <div class="summary-card" style="background: var(--card-bg); padding: 1.5rem; border-radius: 8px; margin-bottom: 1rem;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                        <div>
+                            <div class="summary-label">Entry Threshold</div>
+                            <div id="finalEntryThreshold" class="summary-value">-</div>
+                        </div>
+                        <div>
+                            <div class="summary-label">Exit Threshold</div>
+                            <div id="finalExitThreshold" class="summary-value">-</div>
+                        </div>
+                        <div>
+                            <div class="summary-label">Train Profit</div>
+                            <div id="finalTrainProfit" class="summary-value">-</div>
+                        </div>
+                        <div>
+                            <div class="summary-label">Valid Profit</div>
+                            <div id="finalValidProfit" class="summary-value">-</div>
+                        </div>
+                        <div>
+                            <div class="summary-label">Test Profit</div>
+                            <div id="finalTestProfit" class="summary-value">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pattern Detection Summary -->
+            <div id="patternDetection" class="results-section" style="display: none;">
+                <h4>Pattern Detection</h4>
+                <div id="patternDetectionContent"></div>
+            </div>
+
+            <!-- Visualizations -->
+            <div class="results-section">
+                <h4>Visualizations</h4>
+                <div style="display: grid; gap: 2rem; margin-top: 1rem;">
+                    <div>
+                        <h5>Profit Heatmap (Training Set)</h5>
+                        <canvas id="profitHeatmapTrainCanvas" style="max-width: 100%;"></canvas>
+                    </div>
+                    <div>
+                        <h5>Profit Heatmap (Validation Set)</h5>
+                        <canvas id="profitHeatmapValidCanvas" style="max-width: 100%;"></canvas>
+                    </div>
+                    <div>
+                        <h5>Profit Factor Heatmap (Validation Set)</h5>
+                        <canvas id="profitFactorHeatmapCanvas" style="max-width: 100%;"></canvas>
+                    </div>
+                    <div>
+                        <h5>Marginal Effects</h5>
+                        <canvas id="marginalEffectsCanvas" style="max-width: 100%;"></canvas>
+                    </div>
+                    <div>
+                        <h5>Tradeoff: Trade Frequency vs. Profitability</h5>
+                        <canvas id="tradeoffScatterCanvas" style="max-width: 100%;"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Tables -->
+            <div class="results-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h4 style="margin: 0;">Training Results (Top N)</h4>
+                    <button id="exportCsvBtn" class="btn-secondary" style="display: none;">Export as CSV</button>
+                </div>
+                <div id="trainingResultsTable" style="overflow-x: auto;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+

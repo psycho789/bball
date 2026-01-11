@@ -7,7 +7,7 @@ Big O: O(n) where n = number of games in scoreboard
 """
 
 from typing import Any
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from datetime import datetime, timedelta, date, timezone
 import subprocess
 import os
@@ -15,6 +15,7 @@ import json
 import threading
 import re
 from pathlib import Path
+import asyncio
 
 from ..db import get_db_connection
 from ..logging_config import get_logger
@@ -33,10 +34,13 @@ _update_task_lock = threading.Lock()
 _update_task_running = False
 
 
-@router.get("/update/status")
+@router.get("/api/update/status")
 def get_update_status() -> dict[str, Any]:
     """
     Check if an update task is currently running.
+    
+    Maintained for backward compatibility and initial status checks.
+    For real-time updates, use WebSocket endpoint at /ws/update/status
     
     Returns:
         - is_running: True if update is in progress
@@ -52,46 +56,171 @@ def get_update_status() -> dict[str, Any]:
     }
 
 
-@router.get("/update/check-new-games")
-def check_new_games() -> dict[str, Any]:
+@router.websocket("/ws/update/status")
+async def websocket_update_status(websocket: WebSocket):
     """
-    Check if there are Kalshi markets that need candlestick data fetched/loaded.
+    WebSocket endpoint for streaming update status in real-time.
     
-    This checks the last step of the update process (Step 6):
-    - Are there Kalshi markets that don't have candlestick data?
+    Design Pattern: WebSocket Handler Pattern + Observer Pattern
+    Algorithm: Monitor status flag for changes + broadcast to connected clients
+    Big O: O(1) per connection, O(1) per status update
     
-    Note: Kalshi markets are fetched independently (Step 5) and don't require
-    ESPN probability data. The matching to ESPN games happens via migration 028.
+    Message format sent to client:
+        {
+            "type": "status",
+            "is_running": bool,
+            "message": str
+        }
     
-    Returns:
-        - new_kalshi_candlesticks: Number of Kalshi markets without candlestick data
-        - has_new_data: True if new_kalshi_candlesticks > 0
+    Connection can be maintained or closed after update completes.
     """
-    logger.info("[CHECK_NEW_GAMES] Checking for Kalshi markets needing candlestick data")
+    global _update_task_running
+    
+    client_ip = None
+    if websocket.client:
+        client_ip = websocket.client.host
+    
+    logger.info(f"WebSocket update status connection attempt: client_ip={client_ip}")
+    
+    # Get initial status
+    is_running = _update_task_running or _update_task_lock.locked()
+    initial_status = {
+        "is_running": is_running,
+        "message": "Update in progress" if is_running else "No update running"
+    }
     
     try:
+        await websocket.accept()
+        logger.info(f"WebSocket update status connection accepted: client_ip={client_ip}")
+        
+        # Send initial status
+        await websocket.send_json({
+            "type": "status",
+            "is_running": initial_status["is_running"],
+            "message": initial_status["message"]
+        })
+        
+        # Track last sent status to detect changes
+        last_is_running = initial_status["is_running"]
+        
+        # Monitor status for changes
+        while True:
+            try:
+                # Check for status changes every 200ms
+                await asyncio.sleep(0.2)
+                
+                current_is_running = _update_task_running or _update_task_lock.locked()
+                
+                # Check if status has changed
+                if current_is_running != last_is_running:
+                    # Status changed, send update
+                    current_status = {
+                        "is_running": current_is_running,
+                        "message": "Update in progress" if current_is_running else "No update running"
+                    }
+                    
+                    await websocket.send_json({
+                        "type": "status",
+                        "is_running": current_status["is_running"],
+                        "message": current_status["message"]
+                    })
+                    
+                    last_is_running = current_is_running
+                    
+                    # Optionally close connection when update completes (or keep it open for future updates)
+                    # For now, keep connection open so client can monitor future updates
+                
+                # Handle incoming messages (ping/pong for connection health)
+                try:
+                    message = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+                    try:
+                        data = json.loads(message)
+                        if data.get("type") == "ping":
+                            await websocket.send_json({
+                                "type": "pong",
+                                "timestamp": asyncio.get_event_loop().time()
+                            })
+                    except json.JSONDecodeError:
+                        pass
+                except asyncio.TimeoutError:
+                    # No message received, continue monitoring
+                    continue
+                    
+            except WebSocketDisconnect:
+                logger.info("WebSocket update status connection disconnected")
+                break
+            except Exception as e:
+                logger.error(f"Error in update status WebSocket: {e}", exc_info=True)
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Error: {str(e)}"
+                    })
+                except Exception:
+                    pass
+                await asyncio.sleep(1)  # Wait before retrying
+    
+    except WebSocketDisconnect:
+        logger.info("WebSocket update status connection closed normally")
+    except Exception as e:
+        logger.error(f"WebSocket update status error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=f"Server error: {str(e)}")
+        except Exception:
+            pass
+
+
+@router.get("/api/update/check-new-games")
+def check_new_games() -> dict[str, Any]:
+    """
+    Check if there are games that need data updates.
+    
+    Checks multiple steps of the update process:
+    1. New ESPN games that need probabilities fetched (from scoreboard files)
+    2. Kalshi markets that need candlestick data fetched/loaded
+    
+    Returns:
+        - new_espn_games: Number of new ESPN games needing probabilities
+        - new_kalshi_candlesticks: Number of Kalshi markets without candlestick data
+        - total_new: Total count (for badge display)
+        - has_new_data: True if any updates needed
+    """
+    logger.info("[CHECK_NEW_GAMES] Checking for games needing updates")
+    
+    try:
+        repo_root = get_repo_root()
+        
+        # Check for new ESPN games from scoreboard files (last 30 days to catch up)
+        new_espn_games = len(get_new_games_from_scoreboard(repo_root, days_back=30))
+        logger.info(f"[CHECK_NEW_GAMES] Found {new_espn_games} new ESPN games needing probabilities")
+        
+        # Check for Kalshi markets that don't have candlestick data
+        # Check all past games (no date restriction) to catch up on missed updates
         with get_db_connection() as conn:
-            # Check for Kalshi markets that don't have candlestick data
-            # Focus on recent markets (last 7 days) to keep the check fast
-            # Exclude future games (game_date > CURRENT_DATE) as they may not have candlestick data yet
-            # This is the last step of the update process (Step 6)
             new_candlesticks = conn.execute(
                 """
                 SELECT COUNT(DISTINCT km.ticker)
                 FROM kalshi.markets km
                 LEFT JOIN kalshi.candlesticks kc ON km.ticker = kc.ticker
-                WHERE km.game_date >= CURRENT_DATE - INTERVAL '7 days'
-                  AND km.game_date <= CURRENT_DATE
+                WHERE km.game_date <= CURRENT_DATE
                   AND kc.ticker IS NULL
                 """
             ).fetchone()[0]
             
             logger.info(f"[CHECK_NEW_GAMES] Found {new_candlesticks} Kalshi markets needing candlestick data")
-            
-            return {
-                "new_kalshi_candlesticks": new_candlesticks,
-                "has_new_data": new_candlesticks > 0
-            }
+        
+        # Total count for badge (prioritize candlesticks as it's the final step)
+        # But also include ESPN games count
+        total_new = new_candlesticks + new_espn_games
+        
+        logger.info(f"[CHECK_NEW_GAMES] Total updates needed: {total_new} (ESPN: {new_espn_games}, Kalshi: {new_candlesticks})")
+        
+        return {
+            "new_espn_games": new_espn_games,
+            "new_kalshi_candlesticks": new_candlesticks,
+            "total_new": total_new,
+            "has_new_data": total_new > 0
+        }
             
     except Exception as e:
         logger.error(f"[CHECK_NEW_GAMES] Error checking new games: {e}", exc_info=True)
@@ -1363,65 +1492,96 @@ def run_update_task() -> dict[str, Any]:
         logger.info("[UPDATE_TASK] Lock released, update task complete")
 
 
-@router.post("/update/clear-cache")
+@router.post("/api/update/clear-cache")
 def clear_games_cache() -> dict[str, Any]:
     """
-    Clear the games endpoint cache.
+    Clear the games endpoint cache and aggregate stats cache.
     
     This is useful after running data updates to ensure fresh data is returned.
     Clears both the cache file and forces a reload by deleting the file.
     """
-    logger.info("[CLEAR_CACHE] Clearing games endpoint cache")
+    logger.info("[CLEAR_CACHE] Clearing games endpoint cache and aggregate stats cache")
     
     try:
-        # Get cache file path
+        # Get cache file paths
         cache_dir = Path(__file__).parent.parent.parent / ".cache"
-        cache_file = cache_dir / "list_games.cache"
+        games_cache_file = cache_dir / "list_games.cache"
+        aggregate_stats_cache_file = cache_dir / "get_aggregate_stats.cache"
         
         logger.debug(f"[CLEAR_CACHE] Cache directory: {cache_dir}")
-        logger.debug(f"[CLEAR_CACHE] Cache file: {cache_file}")
-        logger.debug(f"[CLEAR_CACHE] Cache file exists: {cache_file.exists()}")
         
-        # Try to access the actual cache instance from the games endpoint function
-        # The decorator stores it as _cache_instance on the function
-        cache_size_before = 0
-        cache_cleared = False
+        # Clear games cache
+        games_cache_size_before = 0
+        games_cache_cleared = False
         
         try:
             if hasattr(games.list_games, '_cache_instance'):
                 actual_cache = games.list_games._cache_instance
-                cache_size_before = len(actual_cache.cache)
-                logger.info(f"[CLEAR_CACHE] Found games endpoint cache instance: {cache_size_before} entries")
+                games_cache_size_before = len(actual_cache.cache)
+                logger.info(f"[CLEAR_CACHE] Found games endpoint cache instance: {games_cache_size_before} entries")
                 actual_cache.clear()
-                cache_cleared = True
+                games_cache_cleared = True
                 logger.info(f"[CLEAR_CACHE] Cleared in-memory cache from games endpoint")
             else:
                 logger.warning(f"[CLEAR_CACHE] Games endpoint cache instance not found, creating new instance to clear file")
                 # Fallback: create new instance and clear it
                 cache_instance = SimpleCache(ttl_seconds=86400, cache_file="list_games.cache")
-                cache_size_before = len(cache_instance.cache)
+                games_cache_size_before = len(cache_instance.cache)
                 cache_instance.clear()
         except Exception as e:
             logger.warning(f"[CLEAR_CACHE] Error accessing games cache instance: {e}")
         
-        # Also delete the file to force fresh load on next request
-        if cache_file.exists():
-            cache_file.unlink()
-            logger.info(f"[CLEAR_CACHE] Cache file deleted: {cache_file}")
+        # Also delete the games cache file to force fresh load on next request
+        if games_cache_file.exists():
+            games_cache_file.unlink()
+            logger.info(f"[CLEAR_CACHE] Games cache file deleted: {games_cache_file}")
+        
+        # Clear aggregate stats cache
+        aggregate_stats_cache_size_before = 0
+        aggregate_stats_cache_cleared = False
+        
+        try:
+            from . import aggregate_stats
+            if hasattr(aggregate_stats.get_aggregate_stats, '_cache_instance'):
+                actual_cache = aggregate_stats.get_aggregate_stats._cache_instance
+                aggregate_stats_cache_size_before = len(actual_cache.cache)
+                logger.info(f"[CLEAR_CACHE] Found aggregate stats cache instance: {aggregate_stats_cache_size_before} entries")
+                actual_cache.clear()
+                aggregate_stats_cache_cleared = True
+                logger.info(f"[CLEAR_CACHE] Cleared in-memory cache from aggregate stats endpoint")
+            else:
+                logger.warning(f"[CLEAR_CACHE] Aggregate stats cache instance not found, creating new instance to clear file")
+                # Fallback: create new instance and clear it
+                cache_instance = SimpleCache(ttl_seconds=86400, cache_file="get_aggregate_stats.cache")
+                aggregate_stats_cache_size_before = len(cache_instance.cache)
+                cache_instance.clear()
+        except Exception as e:
+            logger.warning(f"[CLEAR_CACHE] Error accessing aggregate stats cache instance: {e}")
+        
+        # Also delete the aggregate stats cache file to force fresh load on next request
+        if aggregate_stats_cache_file.exists():
+            aggregate_stats_cache_file.unlink()
+            logger.info(f"[CLEAR_CACHE] Aggregate stats cache file deleted: {aggregate_stats_cache_file}")
+        
+        total_entries = games_cache_size_before + aggregate_stats_cache_size_before
         
         return {
             "status": "success",
-            "message": f"Games cache cleared ({cache_size_before} entries removed, file deleted)" if cache_cleared else f"Games cache file deleted (in-memory cache may need next request to clear)",
-            "cache_file": str(cache_file),
-            "entries_removed": cache_size_before,
-            "in_memory_cleared": cache_cleared
+            "message": f"Caches cleared (games: {games_cache_size_before} entries, aggregate stats: {aggregate_stats_cache_size_before} entries, files deleted)",
+            "games_cache_file": str(games_cache_file),
+            "aggregate_stats_cache_file": str(aggregate_stats_cache_file),
+            "games_entries_removed": games_cache_size_before,
+            "aggregate_stats_entries_removed": aggregate_stats_cache_size_before,
+            "total_entries_removed": total_entries,
+            "games_in_memory_cleared": games_cache_cleared,
+            "aggregate_stats_in_memory_cleared": aggregate_stats_cache_cleared
         }
     except Exception as e:
         logger.error(f"[CLEAR_CACHE] Error clearing cache: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
 
 
-@router.post("/update/trigger")
+@router.post("/api/update/trigger")
 def trigger_update(background_tasks: BackgroundTasks) -> dict[str, Any]:
     """
     Trigger data update: fetch and load new ESPN and Kalshi data.

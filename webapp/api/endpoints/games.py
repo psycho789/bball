@@ -19,6 +19,80 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+@router.get("/games/seasons")
+@cached(ttl_seconds=86400)  # Cache for 24 hours (seasons don't change often)
+def get_available_seasons() -> dict[str, Any]:
+    """
+    Get list of available seasons from the database.
+    
+    Returns distinct season labels from games that have both ESPN probability data
+    and Kalshi market data, ordered by most recent first.
+    
+    Design Pattern: Simple Query Pattern
+    Algorithm: DISTINCT query with ordering
+    Big O: O(n) where n = number of games (but DISTINCT reduces result set)
+    """
+    try:
+        with get_db_connection() as conn:
+            sql = """
+            SELECT DISTINCT p.season_label
+            FROM espn.probabilities_raw_items p
+            JOIN kalshi.markets km ON km.espn_event_id = p.game_id
+            WHERE p.season_label IS NOT NULL
+              AND km.espn_event_id IS NOT NULL
+            GROUP BY p.season_label
+            HAVING COUNT(DISTINCT p.game_id) > 0
+            ORDER BY p.season_label DESC
+            """
+            rows = conn.execute(sql).fetchall()
+            seasons = [row[0] for row in rows if row[0]]
+            
+            return {
+                "seasons": seasons,
+                "count": len(seasons)
+            }
+    except Exception as e:
+        logger.error(f"Error fetching available seasons: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching available seasons: {str(e)}")
+
+
+@router.get("/games/teams")
+def get_team_abbreviations() -> dict[str, Any]:
+    """
+    Get list of all unique team abbreviations from games in the database.
+    
+    Returns teams sorted alphabetically for use in dropdown filters.
+    """
+    try:
+        with get_db_connection() as conn:
+            # Get unique team abbreviations from both home and away teams
+            teams = conn.execute(
+                """
+                SELECT DISTINCT abbrev
+                FROM (
+                    SELECT home_team_abbrev as abbrev
+                    FROM espn.scoreboard_games
+                    WHERE home_team_abbrev IS NOT NULL
+                    UNION
+                    SELECT away_team_abbrev as abbrev
+                    FROM espn.scoreboard_games
+                    WHERE away_team_abbrev IS NOT NULL
+                ) t
+                ORDER BY abbrev
+                """
+            ).fetchall()
+            
+            team_list = [row[0] for row in teams]
+            
+            return {
+                "teams": team_list,
+                "count": len(team_list)
+            }
+    except Exception as e:
+        logger.error(f"Error fetching team abbreviations: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching team abbreviations: {str(e)}")
+
+
 @router.get("/games")
 @cached(ttl_seconds=3600)  # Cache for 1 hour (reduced from 24h to allow faster updates)
 def list_games(

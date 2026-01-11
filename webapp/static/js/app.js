@@ -318,7 +318,7 @@ async function selectGame(gameId) {
 
 // Initialize app
 /**
- * Clear games cache (hard reset)
+ * Clear all caches (games cache and simulation cache)
  */
 async function clearGamesCache() {
     const btn = document.getElementById('clearCacheBtn');
@@ -330,14 +330,26 @@ async function clearGamesCache() {
     btn.textContent = 'Clearing...';
     
     try {
-        const result = await clearGamesCacheApi();
+        // Clear both games cache and simulation cache
+        const [gamesResult, simulationResult] = await Promise.all([
+            clearGamesCacheApi().catch(err => {
+                console.warn('[CACHE] Error clearing games cache:', err);
+                return { message: 'Games cache clear failed', entries_removed: 0 };
+            }),
+            clearSimulationCacheApi().catch(err => {
+                console.warn('[CACHE] Error clearing simulation cache:', err);
+                return { message: 'Simulation cache clear failed', entries_removed: 0 };
+            })
+        ]);
+        
+        const totalEntries = (gamesResult.entries_removed || 0) + (simulationResult.entries_removed || 0);
         btn.textContent = '✓ Cleared!';
         btn.style.color = 'var(--accent-home)';
         
         // Show success message
-        if (result.message) {
-            console.log(`[CACHE] ${result.message}`);
-        }
+        console.log(`[CACHE] Games cache: ${gamesResult.message || 'cleared'}`);
+        console.log(`[CACHE] Simulation cache: ${simulationResult.message || 'cleared'}`);
+        console.log(`[CACHE] Total entries cleared: ${totalEntries}`);
         
         // Reset button after 2 seconds
         setTimeout(() => {
@@ -346,7 +358,7 @@ async function clearGamesCache() {
             btn.disabled = false;
         }, 2000);
     } catch (error) {
-        console.error('[CACHE] Error clearing cache:', error);
+        console.error('[CACHE] Error clearing caches:', error);
         btn.textContent = '✗ Error';
         btn.style.color = 'var(--accent-away)';
         
@@ -360,6 +372,18 @@ async function clearGamesCache() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // Setup update button (available globally in header)
+    const updateBtn = document.getElementById('updateDataBtn');
+    if (updateBtn && typeof triggerDataUpdate === 'function') {
+        // Remove any existing listeners and add new one
+        updateBtn.onclick = triggerDataUpdate;
+    }
+    
+    // Check for new games on page load (available globally)
+    if (typeof checkNewGames === 'function') {
+        checkNewGames();
+    }
+    
     // Check initial route and load appropriate template
     const route = getRoute();
     if (route.view === 'live-detail' && route.gameId) {
@@ -379,10 +403,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (route.view === 'simulation') {
         // We're on the simulation page
         await showSimulationPageView();
+    } else if (route.view === 'logging') {
+        // We're on the logging page
+        await showLoggingPageView();
+    } else if (route.view === 'grid-search') {
+        // We're on the grid search page
+        await showGridSearchPageView();
     } else {
         // We're on the list view
         // Note: showGameListView() already calls initializeGamesList() internally
         await showGameListView();
+    }
+    
+    // Update active nav after initial load
+    if (typeof updateActiveNav === 'function') {
+        updateActiveNav();
+    }
+    
+    // Check update status on page load (in case update is already running)
+    if (typeof checkUpdateStatus === 'function') {
+        checkUpdateStatus().then((status) => {
+            // If update is running, connect to WebSocket for real-time updates
+            if (status.is_running && typeof connectUpdateStatusWebSocket === 'function') {
+                connectUpdateStatusWebSocket();
+            }
+        });
     }
 });
 

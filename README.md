@@ -161,7 +161,7 @@ pip install matplotlib seaborn scipy
 
 1. **Test with small batch first** (recommended):
    ```bash
-   python scripts/grid_search_hyperparameters.py \
+   python scripts/trade/grid_search_hyperparameters.py \
      --season "2025-26" \
      --entry-min 0.02 --entry-max 0.05 --entry-step 0.01 \
      --exit-min 0.00 --exit-max 0.02 --exit-step 0.01 \
@@ -176,7 +176,7 @@ pip install matplotlib seaborn scipy
 
 2. **Run full grid search** (tests all valid parameter combinations):
    ```bash
-   python scripts/grid_search_hyperparameters.py \
+   python scripts/trade/grid_search_hyperparameters.py \
      --season "2025-26" \
      --entry-min 0.02 --entry-max 0.10 --entry-step 0.01 \
      --exit-min 0.00 --exit-max 0.05 --exit-step 0.005 \

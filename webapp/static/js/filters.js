@@ -6,16 +6,51 @@
  * Big O: O(1) for filter operations
  */
 
+async function loadTeamOptions() {
+    const teamFilter = document.getElementById('teamFilter');
+    if (!teamFilter) return;
+    
+    try {
+        const response = await fetch('/api/games/teams');
+        if (!response.ok) throw new Error('Failed to fetch teams');
+        const data = await response.json();
+        
+        // Store current value before clearing
+        const currentValue = teamFilter.value;
+        
+        // Clear existing options except "All Teams"
+        teamFilter.innerHTML = '<option value="">All Teams</option>';
+        
+        // Add team options
+        data.teams.forEach(team => {
+            const option = document.createElement('option');
+            option.value = team;
+            option.textContent = team;
+            teamFilter.appendChild(option);
+        });
+        
+        // Restore previous value if it exists
+        if (currentValue) {
+            teamFilter.value = currentValue;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error loading team options:', error);
+        // Fallback to empty dropdown with just "All Teams"
+        return false;
+    }
+}
+
 function setupFilters() {
     const sortBy = document.getElementById('sortBy');
     const sortOrder = document.getElementById('sortOrder');
-    const hasKalshi = document.getElementById('hasKalshi');
     const teamFilter = document.getElementById('teamFilter');
     const dateFrom = document.getElementById('dateFrom');
     const dateTo = document.getElementById('dateTo');
     const clearFilters = document.getElementById('clearFilters');
     
-    if (!sortBy || !sortOrder || !hasKalshi || !teamFilter || !dateFrom || !dateTo || !clearFilters) {
+    if (!sortBy || !sortOrder || !teamFilter || !dateFrom || !dateTo || !clearFilters) {
         return;
     }
     
@@ -23,18 +58,21 @@ function setupFilters() {
     const filters = getFilters();
     sortBy.value = filters.sort_by || 'date';
     sortOrder.value = filters.sort_order || 'desc';
-    hasKalshi.value = filters.has_kalshi === null ? '' : filters.has_kalshi.toString();
-    teamFilter.value = filters.team_filter || '';
     dateFrom.value = filters.date_from || '';
     dateTo.value = filters.date_to || '';
+    
+    // Load team options and set value after loading
+    loadTeamOptions().then(() => {
+        teamFilter.value = filters.team_filter || '';
+    });
     
     // Filter change handler
     function applyFilters() {
         const newFilters = {
             sort_by: sortBy.value,
             sort_order: sortOrder.value,
-            has_kalshi: hasKalshi.value === '' ? null : hasKalshi.value === 'true',
-            team_filter: teamFilter.value.trim() || null,
+            has_kalshi: null, // Always null - filter removed
+            team_filter: teamFilter.value || null,
             date_from: dateFrom.value || null,
             date_to: dateTo.value || null,
         };
@@ -46,8 +84,7 @@ function setupFilters() {
     // Attach event listeners
     sortBy.addEventListener('change', applyFilters);
     sortOrder.addEventListener('change', applyFilters);
-    hasKalshi.addEventListener('change', applyFilters);
-    teamFilter.addEventListener('input', debounce(applyFilters, 500)); // Debounce text input
+    teamFilter.addEventListener('change', applyFilters);
     dateFrom.addEventListener('change', applyFilters);
     dateTo.addEventListener('change', applyFilters);
     
@@ -55,7 +92,6 @@ function setupFilters() {
     clearFilters.addEventListener('click', () => {
         sortBy.value = 'date';
         sortOrder.value = 'desc';
-        hasKalshi.value = '';
         teamFilter.value = '';
         dateFrom.value = '';
         dateTo.value = '';

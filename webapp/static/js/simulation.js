@@ -41,38 +41,82 @@ async function runBulkSimulation(numGames, entryThreshold, exitThreshold, exclud
 }
 
 /**
- * Poll for simulation progress
+ * Connect to WebSocket for simulation progress updates.
+ * 
+ * Design Pattern: WebSocket Handler Pattern
+ * Algorithm: O(1) connection, O(1) per update
+ * Big O: O(1) for connection operations, O(1) for message handling
+ * 
+ * @param {string} requestId - Simulation request ID
+ * @param {Function} onProgress - Callback function called with progress updates
+ * @returns {WebSocket} WebSocket connection (can be used to disconnect)
  */
-async function pollSimulationProgress(requestId, onProgress) {
-    const pollInterval = 500; // Poll every 500ms
-    const maxAttempts = 600; // Max 5 minutes (600 * 500ms)
-    let attempts = 0;
+function connectSimulationProgress(requestId, onProgress) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const url = `${protocol}//${host}/ws/simulation/${requestId}`;
     
-    const poll = async () => {
-        if (attempts >= maxAttempts) {
-            console.warn('Progress polling timeout');
-            return;
-        }
-        
-        try {
-            const response = await fetch(`/api/simulation/progress/${requestId}`);
-            if (response.ok) {
-                const progress = await response.json();
-                onProgress(progress);
-                
-                if (progress.status === 'complete' || progress.status === 'error') {
-                    return; // Stop polling
-                }
-            }
-        } catch (error) {
-            console.error('Error polling progress:', error);
-        }
-        
-        attempts++;
-        setTimeout(poll, pollInterval);
+    console.log(`Connecting to simulation progress WebSocket: ${url}`);
+    
+    const ws = new WebSocket(url);
+    
+    ws.onopen = () => {
+        console.log(`Simulation progress WebSocket connected: requestId=${requestId}`);
     };
     
-    poll();
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'progress') {
+                onProgress(data.progress);
+                
+                // Connection will close automatically when simulation completes
+                if (data.progress.status === 'complete' || data.progress.status === 'error') {
+                    console.log(`Simulation ${requestId} finished with status: ${data.progress.status}`);
+                }
+            } else if (data.type === 'error') {
+                console.error('Simulation progress WebSocket error:', data.message);
+                onProgress({ status: 'error', message: data.message });
+            } else if (data.type === 'pong') {
+                // Connection health check response
+                // No action needed
+            }
+        } catch (error) {
+            console.error('Error parsing simulation progress WebSocket message:', error, event.data);
+        }
+    };
+    
+    ws.onerror = (error) => {
+        console.error(`Simulation progress WebSocket error for ${requestId}:`, error);
+        // Fallback: try HTTP endpoint once
+        fetch(`/api/simulation/progress/${requestId}`)
+            .then(response => response.json())
+            .then(progress => onProgress(progress))
+            .catch(err => console.error('Fallback HTTP request also failed:', err));
+    };
+    
+    ws.onclose = (event) => {
+        console.log(`Simulation progress WebSocket closed for ${requestId}:`, event.code, event.reason);
+        // Connection closed - simulation likely completed or errored
+        // onProgress callback should have been called with final status
+    };
+    
+    // Send ping every 30 seconds to keep connection alive
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+        } else {
+            clearInterval(pingInterval);
+        }
+    }, 30000);
+    
+    // Clean up ping interval when connection closes
+    ws.addEventListener('close', () => {
+        clearInterval(pingInterval);
+    });
+    
+    return ws;
 }
 
 /**
@@ -95,7 +139,7 @@ function formatPercent(value) {
 /**
  * View state management
  */
-let currentViewMode = 'advanced'; // 'advanced' or 'simplified'
+let currentViewMode = 'simplified'; // 'advanced' or 'simplified'
 
 /**
  * Toggle between simplified and advanced views
@@ -931,10 +975,14 @@ function initializeSimulationPage() {
     // Initialize view toggle button
     const toggleBtn = document.getElementById('viewToggleBtn');
     const toggleText = document.getElementById('viewToggleText');
-    if (toggleBtn && toggleText) {
-        // Default to advanced view
-        currentViewMode = 'advanced';
-        toggleText.textContent = 'Simplified View';
+    const simplifiedView = document.getElementById('simplifiedView');
+    const advancedView = document.getElementById('advancedView');
+    if (toggleBtn && toggleText && simplifiedView && advancedView) {
+        // Default to simplified view
+        currentViewMode = 'simplified';
+        toggleText.textContent = 'Advanced View';
+        simplifiedView.style.display = 'block';
+        advancedView.style.display = 'none';
     }
     
     // Enable run button (always enabled since we just need a number)
@@ -963,20 +1011,22 @@ function initializeSimulationPage() {
             const loadingDiv = document.getElementById('simulationLoading');
             const loadingProgressText = document.getElementById('loadingProgressText');
             const exportButtons = document.getElementById('simulationExportButtons');
-            if (loadingDiv) loadingDiv.style.display = 'block';
+            if (loadingDiv) loadingDiv.style.display = 'flex';
             if (exportButtons) exportButtons.style.display = 'none';
             if (runSimulationBtn) runSimulationBtn.disabled = true;
             
             // Generate request ID for progress tracking
             const requestId = `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             
-            // Start progress polling
-            pollSimulationProgress(requestId, (progress) => {
+            // Connect to WebSocket for real-time progress updates
+            const progressWebSocket = connectSimulationProgress(requestId, (progress) => {
                 if (loadingProgressText) {
                     if (progress.status === 'running' && progress.total > 0) {
                         loadingProgressText.textContent = `Analyzing games: ${progress.current}/${progress.total}`;
                     } else if (progress.status === 'complete') {
                         loadingProgressText.textContent = 'Finalizing results...';
+                    } else if (progress.status === 'error') {
+                        loadingProgressText.textContent = 'Simulation error occurred';
                     } else {
                         loadingProgressText.textContent = 'Running simulation...';
                     }
