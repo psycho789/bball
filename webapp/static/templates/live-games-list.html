@@ -1,0 +1,39 @@
+<!-- Live Games List View -->
+<section class="live-games-list-view" id="liveGamesListView" style="display: block;">
+    <div class="live-games-header">
+        <h2>Live Games</h2>
+        <div class="live-games-controls">
+            <button id="refreshLiveGames" class="refresh-button" title="Refresh now">
+                ↻ Refresh
+            </button>
+            <div class="auto-refresh-indicator" id="autoRefreshIndicator">
+                <span class="refresh-dot"></span>
+                Auto-refreshing every 30s
+            </div>
+        </div>
+    </div>
+    
+    <div class="loading" id="liveGamesLoading" style="display: none;">
+        <div class="loading-spinner"></div>
+        Loading live games...
+    </div>
+    
+    <div class="live-games-container" id="liveGamesContainer">
+        <!-- Live games will be rendered here -->
+    </div>
+    
+    <div class="empty-state" id="liveGamesEmptyState" style="display: none;">
+        <div class="empty-state-icon">🏀</div>
+        <h3>No Live Games</h3>
+        <p>There are currently no NBA games in progress.</p>
+        <p class="empty-state-hint">Games will appear here automatically when they start.</p>
+    </div>
+    
+    <div class="error-state" id="liveGamesErrorState" style="display: none;">
+        <div class="error-icon">⚠️</div>
+        <h3>Error Loading Live Games</h3>
+        <p id="liveGamesErrorMessage">Unable to fetch live games. Please try again.</p>
+        <button id="retryLiveGames" class="retry-button">Retry</button>
+    </div>
+</section>
+

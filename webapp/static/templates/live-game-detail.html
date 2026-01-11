@@ -1,0 +1,79 @@
+<!-- Live Game Detail View -->
+<section class="live-game-detail-view" id="liveGameDetailView" style="display: block;">
+    <div class="back-button-container">
+        <button class="back-button" id="backButton" onclick="navigateToLiveGamesList()">
+            ← Back to Live Games
+        </button>
+    </div>
+    
+    <div class="live-game-status-bar">
+        <div class="connection-status" id="connectionStatus">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span class="status-text" id="statusText">Connecting...</span>
+        </div>
+    </div>
+    
+    <section class="chart-section" id="chartSection">
+        <div class="score-header" id="scoreHeader">
+            <div class="team-display home">
+                <div class="team-info">
+                    <div class="team-abbr" id="homeAbbr">HOME</div>
+                    <div class="team-name" id="homeName">Home Team</div>
+                </div>
+                <div class="team-score" id="homeScore">0</div>
+            </div>
+            
+            <div class="score-separator">
+                <span class="live-badge" id="liveBadge">LIVE</span>
+                <span class="score-dash">—</span>
+                <a id="kalshiLink" href="#" target="_blank" rel="noopener noreferrer" style="display: none; margin-top: 8px; font-size: 0.625rem; color: var(--accent-kalshi); text-decoration: none; opacity: 0.8; transition: opacity 0.2s;">
+                    View on Kalshi ↗
+                </a>
+            </div>
+            
+            <div class="team-display away">
+                <div class="team-score" id="awayScore">0</div>
+                <div class="team-info">
+                    <div class="team-abbr" id="awayAbbr">AWAY</div>
+                    <div class="team-name" id="awayName">Away Team</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <div id="chart"></div>
+        </div>
+        
+        <div class="quarter-labels">
+            <span class="quarter-label">Q1</span>
+            <span class="quarter-label">Q2</span>
+            <span class="quarter-label">Q3</span>
+            <span class="quarter-label">Q4</span>
+        </div>
+        
+        <div class="chart-toggles">
+            <div class="toggle-group">
+                <input type="checkbox" id="toggleESPN" class="toggle-checkbox" checked>
+                <label for="toggleESPN" class="toggle-label">ESPN</label>
+            </div>
+            <div class="toggle-group">
+                <input type="checkbox" id="toggleKalshi" class="toggle-checkbox" checked>
+                <label for="toggleKalshi" class="toggle-label">Kalshi</label>
+            </div>
+        </div>
+        
+        <div class="chart-legend" id="chartLegend">
+            <div class="legend-item">
+                <div class="legend-line home"></div>
+                <span class="legend-text" id="homeLegend">Home Win %</span>
+                <span class="legend-source">(ESPN)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-line away"></div>
+                <span class="legend-text" id="awayLegend">Away Win %</span>
+                <span class="legend-source">(ESPN)</span>
+            </div>
+        </div>
+    </section>
+</section>
+

@@ -1,0 +1,93 @@
+{
+  "created_at_utc": "20251221T031347Z",
+  "version": "v1",
+  "train_season_start_max": 2022,
+  "calib_season_start": 2023,
+  "test_season_start": 2024,
+  "buckets_seconds_remaining": [
+    2880,
+    2820,
+    2760,
+    2700,
+    2640,
+    2580,
+    2520,
+    2460,
+    2400,
+    2340,
+    2280,
+    2220,
+    2160,
+    2100,
+    2040,
+    1980,
+    1920,
+    1860,
+    1800,
+    1740,
+    1680,
+    1620,
+    1560,
+    1500,
+    1440,
+    1380,
+    1320,
+    1260,
+    1200,
+    1140,
+    1080,
+    1020,
+    960,
+    900,
+    840,
+    780,
+    720,
+    660,
+    600,
+    540,
+    480,
+    420,
+    360,
+    300,
+    240,
+    180,
+    120,
+    60,
+    0
+  ],
+  "preprocess": {
+    "point_diff_mean": 1.1619950651701054,
+    "point_diff_std": 10.532673675405693,
+    "time_rem_mean": 1440.8345913964595,
+    "time_rem_std": 848.3910367806988,
+    "possession_categories": [
+      "home",
+      "away",
+      "unknown"
+    ]
+  },
+  "feature_names": [
+    "point_differential_scaled",
+    "time_remaining_regulation_scaled",
+    "possession_home",
+    "possession_away",
+    "possession_unknown"
+  ],
+  "model": {
+    "weights": [
+      1.5946918635197205,
+      0.03161094511862425,
+      -0.06274760540051569,
+      -0.02286863391666133,
+      0.08561624003139906
+    ],
+    "intercept": 0.3806004541719734,
+    "l2_lambda": 1.0,
+    "max_iter": 50,
+    "tol": 1e-08
+  },
+  "platt": {
+    "alpha": -0.05174414585551251,
+    "beta": 1.0006731118820542
+  }
+}

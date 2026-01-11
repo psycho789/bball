@@ -1,0 +1,52 @@
+# Virtual environments
+env/
+.venv/
+.venv_*/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment files
+.env
+.env.*
+
+# Data directories (large raw data files)
+
+# Cache directories
+.cache/
+webapp/.cache/
+
+# Log files
+*.log
+webapp/logs/
+logs/
+
+# Artifacts and backups
+artifacts/
+
+# Cursor analysis/research files (optional - uncomment if you don't want these indexed)
+# cursor-files/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build and distribution
+dist/
+build/
+*.egg-info/
+
+
+

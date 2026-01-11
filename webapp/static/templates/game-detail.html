@@ -1,0 +1,163 @@
+<!-- Game Detail View -->
+<section class="game-detail-view" id="gameDetailView" style="display: block;">
+    <div class="game-detail-header">
+        <div class="back-button-container">
+            <button class="back-button" id="backButton" onclick="navigateToGameList()">
+                ← Back to Games
+            </button>
+        </div>
+        <div class="game-selector-container">
+            <label for="gameSelector" class="game-selector-label">Select Game:</label>
+            <select id="gameSelector" class="game-selector">
+                <option value="">Loading games...</option>
+            </select>
+        </div>
+    </div>
+    
+    <section class="chart-section" id="chartSection">
+        <div id="gameDetailLoading" class="loading" style="display: none;">
+            <div class="loading-spinner"></div>
+            <p>Loading game data...</p>
+        </div>
+        <div class="score-header" id="scoreHeader">
+            <div class="team-display home">
+                <div class="team-info">
+                    <div class="team-abbr" id="homeAbbr">HOME</div>
+                    <div class="team-name" id="homeName">Home Team</div>
+                </div>
+                <div class="team-score" id="homeScore">0</div>
+            </div>
+            
+            <div class="score-separator">
+                <span class="final-badge">Final</span>
+                <span class="score-dash">—</span>
+                <a id="kalshiLink" href="#" target="_blank" rel="noopener noreferrer" style="display: none; margin-top: 8px; font-size: 0.625rem; color: var(--accent-kalshi); text-decoration: none; opacity: 0.8; transition: opacity 0.2s;">
+                    View on Kalshi ↗
+                </a>
+            </div>
+            
+            <div class="team-display away">
+                <div class="team-score" id="awayScore">0</div>
+                <div class="team-info">
+                    <div class="team-abbr" id="awayAbbr">AWAY</div>
+                    <div class="team-name" id="awayName">Away Team</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <div id="chart"></div>
+        </div>
+        
+        <div class="quarter-labels">
+            <span class="quarter-label">Q1</span>
+            <span class="quarter-label">Q2</span>
+            <span class="quarter-label">Q3</span>
+            <span class="quarter-label">Q4</span>
+        </div>
+        
+        <div class="chart-controls">
+            <div class="chart-toggles">
+                <div class="toggle-group">
+                    <input type="checkbox" id="toggleESPN" class="toggle-checkbox" checked>
+                    <label for="toggleESPN" class="toggle-label">ESPN</label>
+                </div>
+                <div class="toggle-group">
+                    <input type="checkbox" id="toggleKalshi" class="toggle-checkbox" checked>
+                    <label for="toggleKalshi" class="toggle-label">Kalshi</label>
+                </div>
+                <div class="toggle-group">
+                    <input type="checkbox" id="toggleVolume" class="toggle-checkbox">
+                    <label for="toggleVolume" class="toggle-label">Volume</label>
+                </div>
+            </div>
+            <div class="resolution-selector-group">
+                <label for="candlestickResolution" class="resolution-label">Resolution:</label>
+                <select id="candlestickResolution" class="resolution-selector">
+                    <option value="60">1 Minute (Official)</option>
+                    <option value="10">10 Seconds (Trade-Derived)</option>
+                    <option value="1">1 Second (Trade-Derived)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="chart-legend" id="chartLegend">
+            <div class="legend-item">
+                <div class="legend-line home"></div>
+                <span class="legend-text" id="homeLegend">Home Win %</span>
+                <span class="legend-source">(ESPN)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-line away"></div>
+                <span class="legend-text" id="awayLegend">Away Win %</span>
+                <span class="legend-source">(ESPN)</span>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Simulation Section -->
+    <section id="simulationSection" class="simulation-section">
+        <div class="simulation-controls-compact">
+            <div class="simulation-inputs-row">
+                <div class="sim-input-group">
+                    <label for="simBetAmount">Bet Amount ($):</label>
+                    <input type="number" id="simBetAmount" value="20" min="1" max="1000" step="1" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="simEntryThreshold">Entry Threshold (cents):</label>
+                    <input type="number" id="simEntryThreshold" value="5" min="0" max="50" step="0.5" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="simExitThreshold">Exit Threshold (cents):</label>
+                    <input type="number" id="simExitThreshold" value="0" min="0" max="10" step="0.5" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="simExcludeFirst">Exclude First (sec):</label>
+                    <input type="number" id="simExcludeFirst" value="0" min="0" max="600" step="60" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="simExcludeLast">Exclude Last (sec):</label>
+                    <input type="number" id="simExcludeLast" value="0" min="0" max="600" step="60" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="simUseTradeData" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="simUseTradeData" checked style="width: auto; margin: 0;" />
+                        <span>Use Trade Data</span>
+                    </label>
+                </div>
+                <div class="sim-input-group">
+                    <label for="simEnableFees" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="simEnableFees" style="width: auto; margin: 0;" />
+                        <span>Enable Fees</span>
+                    </label>
+                </div>
+                <div class="sim-input-group">
+                    <button id="simRunBtn" class="btn-primary">Run</button>
+                </div>
+            </div>
+            <div class="scenario-description-compact">
+                <p id="simScenarioText" class="scenario-text-compact">
+                    <strong>Scenario:</strong> If I bought/sold when ESPN odds were more than <span id="simEntryDisplay">5</span> cents outside the betting odds and closed when they were <span id="simExitDisplay">the same</span><span id="simTimeFilterDisplay"></span>, would I make money?
+                </p>
+            </div>
+        </div>
+        
+        <div id="simulationResultsCompact" class="simulation-results-compact" style="display: none;">
+            <div class="results-inline">
+                <span><strong>Profit:</strong> <span id="simTotalProfitCompact">$0.00</span></span>
+                <span><strong>Trades:</strong> <span id="simNumTradesCompact">0</span></span>
+                <span><strong>Win Rate:</strong> <span id="simWinRateCompact">0%</span></span>
+                <span><strong>Avg/Trade:</strong> <span id="simAvgProfitCompact">$0.00</span></span>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Stats Section -->
+    <div class="stats-section" id="statsSection" style="display: none;">
+        <h3>Game Statistics</h3>
+        <div class="stats-grid" id="statsGrid">
+            <!-- Stats will be populated by JavaScript -->
+        </div>
+    </div>
+</section>
+

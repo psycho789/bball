@@ -1,0 +1,19 @@
+{
+  "name": "kalshi-test",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "npx tsx test-api.ts",
+    "compare": "npx tsx compare_espn_kalshi.ts"
+  },
+  "dependencies": {
+    "kalshi-typescript": "^3.3.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
+

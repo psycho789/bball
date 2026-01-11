@@ -1,0 +1,550 @@
+<div id="simulationView" style="display: none;">
+    <div class="simulation-container">
+        <div class="simulation-header">
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <button class="back-button" onclick="navigateToGameList()">
+                    ← Games List
+                </button>
+                <h2>Trading Simulation</h2>
+            </div>
+            <button id="clearSimulationCacheBtn" class="clear-cache-btn" onclick="clearSimulationCache()" title="Clear simulation results cache">
+                🔄 Clear Trading Cache
+            </button>
+        </div>
+
+        <div class="scenario-description-compact">
+            <p id="scenarioText" class="scenario-text-compact">
+                <strong>Scenario:</strong> If I bought/sold when ESPN odds were more than <span id="entryThresholdDisplay">5</span> cents outside the betting odds and closed when they were within <span id="exitThresholdDisplay">2</span> cents<span id="timeFilterDisplay"></span> across <span id="numGamesDisplay">the last 500 games</span>, would I make money?
+            </p>
+        </div>
+
+        <div class="simulation-controls-compact">
+            <div class="simulation-inputs-row">
+                <div class="sim-input-group">
+                    <label for="numGames">Number of Games:</label>
+                    <input type="number" id="numGames" value="500" min="1" max="500" step="1" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="excludeFirst">Exclude First (seconds):</label>
+                    <input type="number" id="excludeFirst" value="60" min="0" max="600" step="60" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="excludeLast">Exclude Last (seconds):</label>
+                    <input type="number" id="excludeLast" value="60" min="0" max="600" step="60" />
+            </div>
+                <div class="sim-input-group">
+                <label for="betAmount">Bet Amount ($):</label>
+                <input type="number" id="betAmount" value="20" min="1" max="1000" step="1" />
+            </div>
+                <div class="sim-input-group">
+                <label for="entryThreshold">Entry Threshold (cents):</label>
+                <input type="number" id="entryThreshold" value="5" min="0" max="50" step="0.5" />
+            </div>
+                <div class="sim-input-group">
+                <label for="exitThreshold">Exit Threshold (cents):</label>
+                <input type="number" id="exitThreshold" value="2" min="0" max="10" step="0.5" />
+                </div>
+                <div class="sim-input-group">
+                    <label for="useTradeData" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="useTradeData" checked style="width: auto; margin: 0;" />
+                        <span>Use Trade Data</span>
+                    </label>
+                </div>
+                <div class="sim-input-group">
+                    <label for="enableFees" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="enableFees" style="width: auto; margin: 0;" />
+                        <span>Enable Fees</span>
+                    </label>
+                </div>
+                <div class="sim-input-group">
+                    <label>&nbsp;</label>
+                    <button id="runSimulationBtn" class="btn-primary">Run Simulation</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="simulationResults" class="simulation-results" style="display: none;">
+            <div class="results-header">
+                <div>
+            <h3>Simulation Results</h3>
+                    <div class="sample-size-badge" id="sampleSizeBadge" style="display: none; margin-top: 4px;">
+                        <span id="sampleSizeBadgeText" style="font-size: 0.75rem; color: var(--text-secondary);"></span>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <button id="viewToggleBtn" class="view-toggle-btn" onclick="toggleSimulationView()" title="Toggle between Simplified and Advanced views">
+                        <span id="viewToggleText">Simplified View</span>
+                    </button>
+                    <div class="export-buttons" id="simulationExportButtons" style="display: none;">
+                        <button class="export-btn" id="exportSimulationImageBtn" onclick="exportSimulationToImage()" title="Export as image (PNG)">
+                            🖼️ Export Image
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Simplified View -->
+            <div id="simplifiedView" class="simplified-view" style="display: none;">
+                <!-- Entry/Exit Conditions Section -->
+                <div class="entry-exit-conditions-section">
+                    <h4>Entry/Exit Conditions</h4>
+                    <div class="entry-exit-grid">
+                        <div class="entry-exit-item">
+                            <div class="entry-exit-label">Entry Threshold:</div>
+                            <div id="simplifiedEntryThreshold" class="entry-exit-value">5 cents</div>
+                        </div>
+                        <div class="entry-exit-item">
+                            <div class="entry-exit-label">Exit Threshold:</div>
+                            <div id="simplifiedExitThreshold" class="entry-exit-value">0 cents</div>
+                        </div>
+                    </div>
+                    <div class="strategy-explanation">
+                        <strong>Strategy:</strong>
+                        <ul>
+                            <li><strong>Long ESPN:</strong> Buy when ESPN probability > Kalshi price + entry threshold</li>
+                            <li><strong>Short ESPN:</strong> Sell when ESPN probability < Kalshi price - entry threshold</li>
+                            <li><strong>Exit:</strong> Close position when |ESPN probability - Kalshi price| ≤ exit threshold</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Summary Stats -->
+                <div class="results-summary">
+                    <div class="summary-card">
+                        <div class="summary-label">Total Profit/Loss</div>
+                        <div id="simplifiedTotalProfit" class="summary-value">$0.00</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">ROI</div>
+                        <div id="simplifiedRoiPercentage" class="summary-value">0.00%</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Number of Games</div>
+                        <div id="simplifiedNumGames" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Number of Trades</div>
+                        <div id="simplifiedNumTrades" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Win Rate</div>
+                        <div id="simplifiedWinRate" class="summary-value">0%</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Avg Profit/Trade</div>
+                        <div id="simplifiedAvgProfit" class="summary-value">$0.00</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Median Profit/Trade</div>
+                        <div id="simplifiedMedianProfit" class="summary-value">$0.00</div>
+                    </div>
+                </div>
+                
+                <!-- Position Breakdown -->
+                <div class="results-section">
+                    <h4>Position Type Breakdown</h4>
+                    <div class="position-breakdown">
+                        <div class="position-card">
+                            <div class="position-header">Long ESPN</div>
+                            <div class="position-stats">
+                                <div class="position-stat">
+                                    <span class="stat-label">Count:</span>
+                                    <span id="simplifiedLongCount" class="stat-value">0</span>
+                                </div>
+                                <div class="position-stat">
+                                    <span class="stat-label">Profit:</span>
+                                    <span id="simplifiedLongProfit" class="stat-value">$0.00</span>
+                                </div>
+                                <div class="position-stat">
+                                    <span class="stat-label">Win Rate:</span>
+                                    <span id="simplifiedLongWinRate" class="stat-value">0%</span>
+                                </div>
+                                <div class="position-stat">
+                                    <span class="stat-label">Avg Profit:</span>
+                                    <span id="simplifiedLongAvgProfit" class="stat-value">$0.00</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="position-card">
+                            <div class="position-header">Short ESPN</div>
+                            <div class="position-stats">
+                                <div class="position-stat">
+                                    <span class="stat-label">Count:</span>
+                                    <span id="simplifiedShortCount" class="stat-value">0</span>
+                                </div>
+                                <div class="position-stat">
+                                    <span class="stat-label">Profit:</span>
+                                    <span id="simplifiedShortProfit" class="stat-value">$0.00</span>
+                                </div>
+                                <div class="position-stat">
+                                    <span class="stat-label">Win Rate:</span>
+                                    <span id="simplifiedShortWinRate" class="stat-value">0%</span>
+                                </div>
+                                <div class="position-stat">
+                                    <span class="stat-label">Avg Profit:</span>
+                                    <span id="simplifiedShortAvgProfit" class="stat-value">$0.00</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Performance Metrics -->
+                <div class="results-section">
+                    <h4>Performance Metrics</h4>
+                    <div class="risk-metrics-grid">
+                        <div class="risk-card">
+                            <div class="risk-label">
+                                Expectancy (EV per Trade)
+                                <span class="tooltip-icon" title="Expected value per trade: EV = (WinRate × AvgWin) − (LossRate × AvgLoss). Positive = profitable strategy on average.">
+                                    ?
+                                    <span class="tooltip-content">
+                                        <strong>What is this?</strong>
+                                        <p>Expected value per trade: EV = (WinRate × AvgWin) − (LossRate × AvgLoss). Positive = profitable strategy on average.</p>
+                                    </span>
+                                </span>
+                            </div>
+                            <div id="simplifiedExpectancy" class="risk-value">$0.00</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-label">
+                                Profit Factor
+                                <span class="tooltip-icon" title="Gross Profits / Gross Losses. >1.0 = profitable. Higher is better.">
+                                    ?
+                                    <span class="tooltip-content">
+                                        <strong>What is this?</strong>
+                                        <p>Gross Profits / Gross Losses. >1.0 = profitable. Higher is better.</p>
+                                    </span>
+                                </span>
+                            </div>
+                            <div id="simplifiedProfitFactor" class="risk-value">0.00</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-label">Max Loss</div>
+                            <div id="simplifiedMaxLoss" class="risk-value negative">$0.00</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-label">Max Win</div>
+                            <div id="simplifiedMaxWin" class="risk-value positive">$0.00</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Risk Metrics -->
+                <div class="results-section">
+                    <h4>Risk Metrics</h4>
+                    <div class="risk-metrics-grid">
+                        <div class="risk-card">
+                            <div class="risk-label">
+                                Max Drawdown ($)
+                                <span class="tooltip-icon" title="Largest peak-to-trough decline in cumulative P&L (dollars).">
+                                    ?
+                                    <span class="tooltip-content">
+                                        <strong>What is this?</strong>
+                                        <p>Largest peak-to-trough decline in cumulative P&L (dollars).</p>
+                                    </span>
+                                </span>
+                            </div>
+                            <div id="simplifiedMaxDrawdownDollars" class="risk-value negative">$0.00</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-label">
+                                Max Drawdown (%)
+                                <span class="tooltip-icon" title="Largest peak-to-trough equity drawdown, expressed as percentage of peak equity. Based on cumulative P&L, not per-trade loss.">
+                                    ?
+                                    <span class="tooltip-content">
+                                        <strong>What is this?</strong>
+                                        <p>Largest peak-to-trough equity drawdown, expressed as percentage of peak equity. Based on cumulative P&L, not per-trade loss.</p>
+                                    </span>
+                                </span>
+                            </div>
+                            <div id="simplifiedMaxDrawdownPercent" class="risk-value negative">0.00%</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-label">
+                                Std Dev (per-trade P&L)
+                                <span class="tooltip-icon" title="Standard deviation of per-trade profit/loss in dollars. Measures trade-to-trade volatility.">
+                                    ?
+                                    <span class="tooltip-content">
+                                        <strong>What is this?</strong>
+                                        <p>Standard deviation of per-trade profit/loss in dollars. Measures trade-to-trade volatility.</p>
+                                    </span>
+                                </span>
+                            </div>
+                            <div id="simplifiedStdDev" class="risk-value">$0.00</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-label">
+                                Sharpe Ratio
+                                <span class="tooltip-icon" title="Sharpe Ratio = (Average Return - Risk-Free Rate) / Std Dev. Returns are per-trade. Risk-free rate = 0. >1.0 is good, >2.0 is excellent.">
+                                    ?
+                                    <span class="tooltip-content">
+                                        <strong>What is this?</strong>
+                                        <p>Sharpe Ratio = (Average Return - Risk-Free Rate) / Std Dev. Returns are per-trade. Risk-free rate = 0. >1.0 is good, >2.0 is excellent.</p>
+                                    </span>
+                                </span>
+                            </div>
+                            <div id="simplifiedSharpeRatio" class="risk-value">0.00</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Advanced View (existing comprehensive view) -->
+            <div id="advancedView" class="advanced-view">
+            <div class="results-summary">
+                <div class="summary-card">
+                    <div class="summary-label">Total Profit/Loss</div>
+                    <div id="totalProfit" class="summary-value">$0.00</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">ROI</div>
+                    <div id="roiPercentage" class="summary-value">0.00%</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Number of Games</div>
+                    <div id="numGamesResult" class="summary-value">0</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Number of Trades</div>
+                    <div id="numTrades" class="summary-value">0</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Win Rate</div>
+                    <div id="winRate" class="summary-value">0%</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Avg Profit/Trade</div>
+                    <div id="avgProfit" class="summary-value">$0.00</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Median Profit/Trade</div>
+                    <div id="medianProfit" class="summary-value">$0.00</div>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h4>Position Type Breakdown</h4>
+                <div class="position-breakdown">
+                    <div class="position-card">
+                        <div class="position-header">Long ESPN</div>
+                        <div class="position-stats">
+                            <div class="position-stat">
+                                <span class="stat-label">Count:</span>
+                                <span id="longCount" class="stat-value">0</span>
+                            </div>
+                            <div class="position-stat">
+                                <span class="stat-label">Profit:</span>
+                                <span id="longProfit" class="stat-value">$0.00</span>
+                            </div>
+                            <div class="position-stat">
+                                <span class="stat-label">Win Rate:</span>
+                                <span id="longWinRate" class="stat-value">0%</span>
+                            </div>
+                            <div class="position-stat">
+                                <span class="stat-label">Avg Profit:</span>
+                                <span id="longAvgProfit" class="stat-value">$0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="position-card">
+                        <div class="position-header">Short ESPN</div>
+                        <div class="position-stats">
+                            <div class="position-stat">
+                                <span class="stat-label">Count:</span>
+                                <span id="shortCount" class="stat-value">0</span>
+                            </div>
+                            <div class="position-stat">
+                                <span class="stat-label">Profit:</span>
+                                <span id="shortProfit" class="stat-value">$0.00</span>
+                            </div>
+                            <div class="position-stat">
+                                <span class="stat-label">Win Rate:</span>
+                                <span id="shortWinRate" class="stat-value">0%</span>
+                            </div>
+                            <div class="position-stat">
+                                <span class="stat-label">Avg Profit:</span>
+                                <span id="shortAvgProfit" class="stat-value">$0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h4>Performance Metrics</h4>
+                <div class="risk-metrics-grid">
+                    <div class="risk-card">
+                        <div class="risk-label">
+                            Expectancy (EV per Trade)
+                            <span class="tooltip-icon" title="Expected value per trade: EV = (WinRate × AvgWin) − (LossRate × AvgLoss). Positive = profitable strategy on average.">
+                                ?
+                                <span class="tooltip-content">
+                                    <strong>What is this?</strong>
+                                    <p>Expected value per trade: EV = (WinRate × AvgWin) − (LossRate × AvgLoss). Positive = profitable strategy on average.</p>
+                                </span>
+                            </span>
+                        </div>
+                        <div id="expectancy" class="risk-value">$0.00</div>
+                    </div>
+                    <div class="risk-card">
+                        <div class="risk-label">
+                            Profit Factor
+                            <span class="tooltip-icon" title="Gross Profits / Gross Losses. >1.0 = profitable. Higher is better.">
+                                ?
+                                <span class="tooltip-content">
+                                    <strong>What is this?</strong>
+                                    <p>Gross Profits / Gross Losses. >1.0 = profitable. Higher is better.</p>
+                                </span>
+                            </span>
+                        </div>
+                        <div id="profitFactor" class="risk-value">0.00</div>
+                    </div>
+                    <div class="risk-card">
+                        <div class="risk-label">Max Loss</div>
+                        <div id="maxLoss" class="risk-value negative">$0.00</div>
+                    </div>
+                    <div class="risk-card">
+                        <div class="risk-label">Max Win</div>
+                        <div id="maxWin" class="risk-value positive">$0.00</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h4>Risk Metrics</h4>
+                <div class="risk-metrics-grid">
+                    <div class="risk-card">
+                        <div class="risk-label">
+                            Max Drawdown ($)
+                            <span class="tooltip-icon" title="Largest peak-to-trough decline in cumulative P&L (dollars).">
+                                ?
+                                <span class="tooltip-content">
+                                    <strong>What is this?</strong>
+                                    <p>Largest peak-to-trough decline in cumulative P&L (dollars).</p>
+                                </span>
+                            </span>
+                        </div>
+                        <div id="maxDrawdownDollars" class="risk-value negative">$0.00</div>
+                    </div>
+                    <div class="risk-card">
+                        <div class="risk-label">
+                            Max Drawdown (%)
+                            <span class="tooltip-icon" title="Largest peak-to-trough equity drawdown, expressed as percentage of peak equity. Based on cumulative P&L, not per-trade loss. Measures worst percentage decline from a high point.">
+                                ?
+                                <span class="tooltip-content">
+                                    <strong>What is this?</strong>
+                                    <p>Largest peak-to-trough equity drawdown, expressed as percentage of peak equity. Based on cumulative P&L, not per-trade loss. Measures worst percentage decline from a high point.</p>
+                                </span>
+                            </span>
+                        </div>
+                        <div id="maxDrawdownPercent" class="risk-value negative">0.00%</div>
+                    </div>
+                    <div class="risk-card">
+                        <div class="risk-label">
+                            Std Dev (per-trade P&L)
+                            <span class="tooltip-icon" title="Standard deviation of per-trade profit/loss in dollars. Measures trade-to-trade volatility.">
+                                ?
+                                <span class="tooltip-content">
+                                    <strong>What is this?</strong>
+                                    <p>Standard deviation of per-trade profit/loss in dollars. Measures trade-to-trade volatility.</p>
+                                </span>
+                            </span>
+                        </div>
+                        <div id="stdDev" class="risk-value">$0.00</div>
+                    </div>
+                    <div class="risk-card">
+                        <div class="risk-label">
+                            Sharpe Ratio
+                            <span class="tooltip-icon" title="Sharpe Ratio = (Average Return - Risk-Free Rate) / Std Dev. Returns are per-trade. Risk-free rate = 0. >1.0 is good, >2.0 is excellent.">
+                                ?
+                                <span class="tooltip-content">
+                                    <strong>What is this?</strong>
+                                    <p>Sharpe Ratio = (Average Return - Risk-Free Rate) / Std Dev. Returns are per-trade. Risk-free rate = 0. >1.0 is good, >2.0 is excellent.</p>
+                                </span>
+                            </span>
+                        </div>
+                        <div id="sharpeRatio" class="risk-value">0.00</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h4>Equity Curve</h4>
+                <div class="sample-size-indicator" id="sampleSizeIndicator" style="margin-bottom: 12px; font-size: 0.875rem; color: var(--text-secondary);">
+                    <span id="sampleSizeText">n = 0 trades</span>
+                </div>
+                <div class="equity-curve-container">
+                    <canvas id="equityCurveChart"></canvas>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h4>Trade Characteristics</h4>
+                <div class="characteristics-grid">
+                    <div class="char-card">
+                        <div class="char-label">Avg Trade Duration</div>
+                        <div id="avgTradeDuration" class="char-value">0 min 0 sec</div>
+                    </div>
+                    <div class="char-card">
+                        <div class="char-label">Avg Entry Divergence</div>
+                        <div id="avgEntryDivergence" class="char-value">0.0 cents</div>
+                    </div>
+                    <div class="char-card">
+                        <div class="char-label">Avg Exit Divergence</div>
+                        <div id="avgExitDivergence" class="char-value">0.0 cents</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h4>Distribution Quartiles</h4>
+                <div class="quartiles-container">
+                    <canvas id="quartilesChart"></canvas>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h4>Per-Game Summary</h4>
+                <div class="per-game-table-container">
+                    <table class="per-game-table">
+                        <thead>
+                            <tr>
+                                <th>Game ID</th>
+                                <th>Date</th>
+                                <th>Trades</th>
+                                <th>Profit</th>
+                                <th>Win Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody id="perGameTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="results-details">
+                <h4>Trade Details</h4>
+                <div id="tradesList" class="trades-list"></div>
+            </div>
+
+            <details class="results-metadata">
+                <summary class="metadata-summary">
+                    <h4 style="display: inline;">Simulation Parameters</h4>
+                </summary>
+                <div id="simulationMetadata" class="metadata-list"></div>
+            </details>
+            </div>
+        </div>
+
+        <div id="simulationError" class="error-message" style="display: none;"></div>
+        
+        <div id="simulationLoading" class="simulation-loading" style="display: none;">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                <p id="loadingProgressText">Running simulation...</p>
+            </div>
+        </div>
+    </div>
+</div>
+

@@ -1,0 +1,76 @@
+.env
+.env.*
+
+.venv/
+.venv_*/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Local raw archives / discovery outputs (warehouse artifacts)
+data/
+
+# Cache directory (persisted cache files)
+.cache/
+webapp/.cache/
+
+# Log files
+webapp/logs/
+logs/
+
+# API keys and secrets
+kalshi-api-key-*.txt
+*.key
+*.pem
+
+# Generated results and artifacts
+artifacts/
+grid_search_results/
+grid_search_test/
+test_entry_015/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python build artifacts
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Database folder (exclude everything)
+db/
+
+# Process ID files
+*.pid
+
+# TypeScript/Node.js
+scripts/kalshi/node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Backup files
+*.bak
+*.backup
+*.bak[2-9]
+

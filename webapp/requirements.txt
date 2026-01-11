@@ -1,0 +1,14 @@
+# Web App Dependencies
+# Install with: pip install -r requirements.txt
+
+fastapi>=0.109.0,<1.0.0
+uvicorn[standard]>=0.27.0,<1.0.0
+psycopg[binary]>=3.1.0,<4.0.0
+python-multipart>=0.0.6,<1.0.0
+
+
+
+
+
+
+
