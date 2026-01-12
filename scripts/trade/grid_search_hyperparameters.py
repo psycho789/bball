@@ -44,6 +44,16 @@ from scripts.lib._db_lib import get_dsn, connect
 # Import simulation functions
 from scripts.trade.simulate_trading_strategy import get_aligned_data, simulate_trading_strategy
 
+# Import cache utilities for shared caching with webapp
+try:
+    from webapp.api.cache import SimpleCache
+    from webapp.api.endpoints.grid_search import _generate_grid_search_cache_key, GRID_SEARCH_CACHE_VERSION
+    CACHE_AVAILABLE = True
+except ImportError:
+    # Fallback if webapp not available
+    CACHE_AVAILABLE = False
+    # Logger not yet defined, will log warning later if needed
+
 # Set up Rich console and logging
 console = Console(stderr=True)
 
@@ -431,6 +441,157 @@ def get_git_hash() -> Optional[str]:
     return None
 
 
+def load_from_cache(cache_key: str, output_dir: Path, season_or_list: str) -> bool:
+    """
+    Try to load grid search results from cache.
+    
+    Returns True if cache hit and files were written, False otherwise.
+    """
+    if not CACHE_AVAILABLE:
+        return False
+    
+    try:
+        cache = SimpleCache(ttl_seconds=86400 * 30, cache_file="grid_search_results.cache")
+        cached_data = cache.get(cache_key)
+        
+        if cached_data is None:
+            return False
+        
+        logger.info(f"Cache HIT! Loading results from cache (key: {cache_key[:32]}...)")
+        
+        # Extract results from cached data
+        train_results = cached_data.get('training_results', [])
+        valid_results = cached_data.get('validation_results', [])
+        test_results = cached_data.get('test_results', [])
+        final_selection = cached_data.get('final_selection', {})
+        
+        # Convert to the format expected by the rest of the script
+        results_by_split = {
+            'train': [],
+            'valid': [],
+            'test': []
+        }
+        
+        # For train, we only have top N, so we need to reconstruct full results
+        # We'll use valid_results structure as template since it has all combinations
+        # Actually, cached data might not have all train results, only top N
+        # So we'll write what we have
+        
+        # Write train results (top N only)
+        for result in train_results:
+            results_by_split['train'].append(result)
+        
+        # Write valid and test results (all combinations)
+        for result in valid_results:
+            results_by_split['valid'].append(result)
+        
+        for result in test_results:
+            results_by_split['test'].append(result)
+        
+        # Write CSV files
+        import csv
+        for split_name in ['train', 'valid', 'test']:
+            csv_path = output_dir / f'grid_results_{split_name}.csv'
+            with open(csv_path, 'w', newline='') as f:
+                if results_by_split[split_name]:
+                    writer = csv.DictWriter(f, fieldnames=[
+                        'entry_threshold', 'exit_threshold', 'net_profit_dollars', 'num_trades',
+                        'win_rate', 'avg_net_profit_per_trade', 'profit_factor', 'max_drawdown',
+                        'total_fees', 'avg_hold_time', 'is_valid'
+                    ])
+                    writer.writeheader()
+                    for row in results_by_split[split_name]:
+                        writer.writerow(row)
+            logger.debug(f"Wrote {csv_path} from cache")
+        
+        # Write JSON files
+        git_hash = get_git_hash()
+        timestamp = datetime.now(timezone.utc).isoformat()
+        metadata = cached_data.get('metadata', {})
+        
+        for split_name in ['train', 'valid', 'test']:
+            json_path = output_dir / f'grid_results_{split_name}.json'
+            json_data = {
+                'metadata': {
+                    **metadata,
+                    'timestamp': timestamp,
+                    'git_hash': git_hash,
+                    'cached': True,
+                    'cache_key': cache_key[:32] + '...'
+                },
+                'results': results_by_split[split_name]
+            }
+            with open(json_path, 'w') as f:
+                json.dump(json_data, f, indent=2)
+            logger.debug(f"Wrote {json_path} from cache")
+        
+        # Write final selection
+        selection_path = output_dir / 'final_selection.json'
+        with open(selection_path, 'w') as f:
+            json.dump(final_selection, f, indent=2)
+        logger.debug(f"Wrote {selection_path} from cache")
+        
+        # Write game splits if available in metadata
+        num_games = metadata.get('num_games', {})
+        if num_games:
+            # We don't have the actual game IDs from cache, but we can create placeholder files
+            # or skip this - the splits aren't critical for analysis
+            pass
+        
+        logger.info("✓ Successfully loaded results from cache")
+        return True
+        
+    except Exception as e:
+        logger.warning(f"Error loading from cache: {e}. Will run grid search normally.")
+        return False
+
+
+def save_to_cache(cache_key: str, results_by_split: dict, final_selection: dict, 
+                  train_games: list, valid_games: list, test_games: list,
+                  combinations: list, config: GridSearchConfig, season_or_list: str):
+    """Save grid search results to cache."""
+    if not CACHE_AVAILABLE:
+        return
+    
+    try:
+        cache = SimpleCache(ttl_seconds=86400 * 30, cache_file="grid_search_results.cache")
+        
+        # Get top N train results
+        train_results_sorted = sorted(results_by_split['train'], 
+                                     key=lambda x: x['net_profit_dollars'], reverse=True)
+        top_n_train = train_results_sorted[:config.top_n]
+        
+        # Prepare cache data in same format as webapp
+        cache_data = {
+            'status': 'complete',
+            'final_selection': final_selection,
+            'training_results': top_n_train,
+            'validation_results': results_by_split['valid'],
+            'test_results': results_by_split['test'],
+            'metadata': {
+                'num_games': {
+                    'train': len(train_games),
+                    'valid': len(valid_games),
+                    'test': len(test_games)
+                },
+                'num_combinations': len(combinations),
+                'search_space': {
+                    'entry_range': [config.entry_min, config.entry_max, config.entry_step],
+                    'exit_range': [config.exit_min, config.exit_max, config.exit_step]
+                },
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'season_or_list': season_or_list
+            }
+        }
+        
+        cache.set(cache_key, cache_data)
+        cache.save()
+        logger.info(f"✓ Results cached (key: {cache_key[:32]}...)")
+        
+    except Exception as e:
+        logger.warning(f"Error saving to cache: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Grid search hyperparameter optimization for trading strategy thresholds"
@@ -443,7 +604,7 @@ def main():
     
     # Grid parameters
     parser.add_argument('--entry-min', type=float, default=0.02, help='Minimum entry threshold (default: 0.02)')
-    parser.add_argument('--entry-max', type=float, default=0.10, help='Maximum entry threshold (default: 0.10)')
+    parser.add_argument('--entry-max', type=float, default=0.20, help='Maximum entry threshold (default: 0.20)')
     parser.add_argument('--entry-step', type=float, default=0.01, help='Entry threshold step size (default: 0.01)')
     parser.add_argument('--exit-min', type=float, default=0.00, help='Minimum exit threshold (default: 0.00)')
     parser.add_argument('--exit-max', type=float, default=0.05, help='Maximum exit threshold (default: 0.05)')
@@ -468,10 +629,15 @@ def main():
     parser.add_argument('--top-n', type=int, default=10, help='Top N train combos to consider for selection (default: 10)')
     parser.add_argument('--bet-amount', type=float, default=20.0, help='Bet amount in dollars (default: 20.0)')
     parser.add_argument('--dsn', type=str, help='Database connection string (or use DATABASE_URL env var)')
+    parser.add_argument('--use-trade-data', action='store_true', default=True, help='Use trade-derived data (default: True)')
+    parser.add_argument('--no-use-trade-data', dest='use_trade_data', action='store_false', help='Use candlesticks instead')
+    parser.add_argument('--exclude-first-seconds', type=int, default=60, help='Exclude first N seconds (default: 60)')
+    parser.add_argument('--exclude-last-seconds', type=int, default=60, help='Exclude last N seconds (default: 60)')
     
     # Test mode parameters
     parser.add_argument('--max-games', type=int, help='Limit number of games for testing (default: no limit)')
     parser.add_argument('--max-combinations', type=int, help='Limit number of combinations for testing (default: no limit)')
+    parser.add_argument('--no-cache', action='store_true', help='Skip cache check and force fresh run')
     
     args = parser.parse_args()
     
@@ -513,11 +679,48 @@ def main():
         valid_ratio=args.valid_ratio,
         test_ratio=args.test_ratio,
         top_n=args.top_n,
-        bet_amount=args.bet_amount
+        bet_amount=args.bet_amount,
+        use_trade_data=args.use_trade_data,
+        exclude_first_seconds=args.exclude_first_seconds,
+        exclude_last_seconds=args.exclude_last_seconds
     )
     
     # Get database connection
     dsn = get_dsn(args.dsn)
+    
+    # Generate cache key (only for season-based searches, not game-list)
+    cache_key = None
+    if args.season and CACHE_AVAILABLE and not args.no_cache:
+        try:
+            cache_key = _generate_grid_search_cache_key(
+                season=args.season,
+                entry_min=args.entry_min,
+                entry_max=args.entry_max,
+                entry_step=args.entry_step,
+                exit_min=args.exit_min,
+                exit_max=args.exit_max,
+                exit_step=args.exit_step,
+                bet_amount=args.bet_amount,
+                enable_fees=args.enable_fees,
+                slippage_rate=args.slippage_rate,
+                exclude_first_seconds=args.exclude_first_seconds,
+                exclude_last_seconds=args.exclude_last_seconds,
+                use_trade_data=args.use_trade_data,
+                train_ratio=args.train_ratio,
+                valid_ratio=args.valid_ratio,
+                test_ratio=args.test_ratio,
+                top_n=args.top_n,
+                min_trade_count=args.min_trade_count,
+                max_games=args.max_games,
+                seed=args.seed
+            )
+            
+            # Try to load from cache
+            if load_from_cache(cache_key, output_dir, args.season):
+                logger.info("Grid search complete (loaded from cache).")
+                return 0
+        except Exception as e:
+            logger.debug(f"Cache check failed: {e}. Will run grid search normally.")
     
     # Get game IDs
     with connect(dsn) as conn:
@@ -816,6 +1019,12 @@ def main():
     with open(selection_path, 'w') as f:
         json.dump(final_selection, f, indent=2)
     logger.debug(f"Wrote {selection_path}")
+    
+    # Save to cache if applicable
+    if cache_key and CACHE_AVAILABLE:
+        save_to_cache(cache_key, results_by_split, final_selection, 
+                     train_games, valid_games, test_games,
+                     combinations, config, season_or_list)
     
     logger.info(f"Grid search complete. Selected: entry={best_combo['entry_threshold']:.3f}, exit={best_combo['exit_threshold']:.3f}")
     test_profit = test_combo_result['net_profit_dollars'] if test_combo_result else 0.0

@@ -338,6 +338,7 @@ def _run_grid_search_background(
     test_ratio: float,
     top_n: int,
     min_trade_count: int,
+    max_games: Optional[int],
     workers: int,
     seed: int,
     dsn: str
@@ -345,6 +346,8 @@ def _run_grid_search_background(
     """Background task to run grid search."""
     try:
         with _grid_search_lock:
+            # Preserve cache_key if it exists (set before background thread started)
+            existing_cache_key = _grid_search_progress.get(request_id, {}).get("_cache_key")
             _grid_search_progress[request_id] = {
                 "status": "running",
                 "current": 0,
@@ -352,6 +355,9 @@ def _run_grid_search_background(
                 "current_combo": None,
                 "error": None
             }
+            # Restore cache_key if it was set
+            if existing_cache_key:
+                _grid_search_progress[request_id]["_cache_key"] = existing_cache_key
             initial_progress = _grid_search_progress[request_id].copy()
         
         # Force initial update to notify WebSocket clients
@@ -388,6 +394,11 @@ def _run_grid_search_background(
         
         if not game_ids:
             raise ValueError(f"No games found for season {season}")
+        
+        # Limit games if max_games is specified (for faster testing)
+        if max_games is not None and len(game_ids) > max_games:
+            logger.info(f"Limiting to {max_games} games for testing (from {len(game_ids)} total)")
+            game_ids = game_ids[:max_games]
         
         # Split games
         train_games, valid_games, test_games = split_games(game_ids, config)
@@ -631,6 +642,14 @@ def _run_grid_search_background(
         }
         
         # Transform data for visualization
+        # Verify train_results and valid_results are different (sanity check)
+        logger.debug(f"[VIZ_DATA] Before transform: train_results has {len(train_results)} items, valid_results has {len(valid_results)} items")
+        if len(train_results) > 0 and len(valid_results) > 0:
+            # Check if first entries are different (quick sanity check)
+            train_first = train_results[0]
+            valid_first = valid_results[0]
+            if train_first.get('net_profit_dollars') == valid_first.get('net_profit_dollars') and train_first.get('entry_threshold') == valid_first.get('entry_threshold'):
+                logger.warning(f"[VIZ_DATA] WARNING: First train and valid results appear identical! This may indicate a bug.")
         visualization_data = _transform_visualization_data(train_results, valid_results, final_selection)
         
         # Detect patterns
@@ -724,6 +743,7 @@ def _generate_grid_search_cache_key(
     test_ratio: float,
     top_n: int,
     min_trade_count: int,
+    max_games: Optional[int] = None,
     seed: int = 42
 ) -> str:
     """
@@ -751,6 +771,7 @@ def _generate_grid_search_cache_key(
         "test_ratio": test_ratio,
         "top_n": top_n,
         "min_trade_count": min_trade_count,
+        "max_games": max_games,
         "seed": seed
     }
     # Create deterministic JSON string and hash it
@@ -762,18 +783,62 @@ def _generate_grid_search_cache_key(
 def _transform_visualization_data(train_results: list[dict], validation_results: list[dict], final_selection: dict) -> dict[str, Any]:
     """Transform results data for client-side Chart.js rendering."""
     try:
-        df_train = pd.DataFrame(train_results)
-        df_valid = pd.DataFrame(validation_results)
+        # Sanity check: ensure train_results and validation_results are different objects
+        if train_results is validation_results:
+            logger.error("[VIZ_DATA] CRITICAL BUG: train_results and validation_results are the same object!")
+            raise ValueError("train_results and validation_results must be different lists")
+        
+        # Create copies to avoid any potential mutation issues
+        train_results_copy = [dict(r) for r in train_results]  # Deep copy each dict
+        validation_results_copy = [dict(r) for r in validation_results]  # Deep copy each dict
+        
+        df_train = pd.DataFrame(train_results_copy)
+        df_valid = pd.DataFrame(validation_results_copy)
+        
+        # Log data summary for debugging
+        logger.info(f"[VIZ_DATA] Train results: {len(train_results)} rows, columns: {list(df_train.columns) if not df_train.empty else 'empty'}")
+        logger.info(f"[VIZ_DATA] Valid results: {len(validation_results)} rows, columns: {list(df_valid.columns) if not df_valid.empty else 'empty'}")
+        if not df_train.empty and 'net_profit_dollars' in df_train.columns:
+            logger.info(f"[VIZ_DATA] Train profit range: {df_train['net_profit_dollars'].min():.2f} to {df_train['net_profit_dollars'].max():.2f}")
+        if not df_valid.empty:
+            if 'net_profit_dollars' in df_valid.columns:
+                logger.info(f"[VIZ_DATA] Valid profit range: {df_valid['net_profit_dollars'].min():.2f} to {df_valid['net_profit_dollars'].max():.2f}")
+            if 'profit_factor' in df_valid.columns:
+                logger.info(f"[VIZ_DATA] Valid profit_factor range: {df_valid['profit_factor'].min():.2f} to {df_valid['profit_factor'].max():.2f}")
+        
+        # Verify dataframes are different
+        if not df_train.empty and not df_valid.empty:
+            if len(df_train) == len(df_valid):
+                # Check if first few rows are identical (quick sanity check)
+                train_sample = df_train.head(3)[['entry_threshold', 'exit_threshold', 'net_profit_dollars']].values.tolist()
+                valid_sample = df_valid.head(3)[['entry_threshold', 'exit_threshold', 'net_profit_dollars']].values.tolist()
+                if train_sample == valid_sample:
+                    logger.warning(f"[VIZ_DATA] WARNING: First 3 rows of train and valid are identical! This may indicate a bug.")
         
         chosen_entry = final_selection['chosen_params']['entry_threshold']
         chosen_exit = final_selection['chosen_params']['exit_threshold']
         
         # Helper function to create heatmap data
         def create_heatmap_data(df, value_col):
+            if df.empty:
+                logger.warning(f"[VIZ_DATA] Empty dataframe for {value_col}")
+                return {
+                    'entry_thresholds': [],
+                    'exit_thresholds': [],
+                    'matrix': [],
+                    'chosen_entry': chosen_entry,
+                    'chosen_exit': chosen_exit
+                }
             pivot = df.pivot(index='exit_threshold', columns='entry_threshold', values=value_col)
             entry_thresholds = sorted(list(pivot.columns))
             exit_thresholds = sorted(list(pivot.index))
             matrix = pivot.reindex(columns=entry_thresholds, index=exit_thresholds).values.tolist()
+            
+            # Log matrix summary for debugging
+            matrix_flat = [val for row in matrix for val in row if val is not None]
+            if matrix_flat:
+                logger.debug(f"[VIZ_DATA] {value_col} matrix: {len(matrix)} rows × {len(matrix[0]) if matrix else 0} cols, value range: {min(matrix_flat):.2f} to {max(matrix_flat):.2f}")
+            
             return {
                 'entry_thresholds': entry_thresholds,
                 'exit_thresholds': exit_thresholds,
@@ -782,13 +847,13 @@ def _transform_visualization_data(train_results: list[dict], validation_results:
                 'chosen_exit': chosen_exit
             }
         
-        # 1. Profit heatmap (TRAIN)
+        # 1. Profit heatmap (TRAIN) - uses TRAIN data with net_profit_dollars
         profit_heatmap_train = create_heatmap_data(df_train, 'net_profit_dollars')
         
-        # 2. Profit heatmap (VALID)
+        # 2. Profit heatmap (VALID) - uses VALID data with net_profit_dollars
         profit_heatmap_valid = create_heatmap_data(df_valid, 'net_profit_dollars')
         
-        # 3. Profit factor heatmap (VALID)
+        # 3. Profit factor heatmap (VALID) - uses VALID data with profit_factor
         profit_factor_heatmap_valid = create_heatmap_data(df_valid, 'profit_factor')
         
         # Marginal effects
@@ -801,6 +866,26 @@ def _transform_visualization_data(train_results: list[dict], validation_results:
             'net_profit': df_valid['net_profit_dollars'].tolist(),
             'entry_threshold': df_valid['entry_threshold'].tolist()
         }
+        
+        # Verify the three heatmaps are different (sanity check)
+        train_matrix_sample = profit_heatmap_train['matrix'][0][0] if profit_heatmap_train['matrix'] and profit_heatmap_train['matrix'][0] else None
+        valid_matrix_sample = profit_heatmap_valid['matrix'][0][0] if profit_heatmap_valid['matrix'] and profit_heatmap_valid['matrix'][0] else None
+        factor_matrix_sample = profit_factor_heatmap_valid['matrix'][0][0] if profit_factor_heatmap_valid['matrix'] and profit_factor_heatmap_valid['matrix'][0] else None
+        
+        logger.info(f"[VIZ_DATA] Sample values - Train profit: {train_matrix_sample}, Valid profit: {valid_matrix_sample}, Valid profit_factor: {factor_matrix_sample}")
+        
+        # Check if train and valid profit heatmaps are identical (they shouldn't be!)
+        if train_matrix_sample == valid_matrix_sample and train_matrix_sample is not None:
+            logger.error(f"[VIZ_DATA] ERROR: Train and Valid profit heatmaps have identical sample values! This is a bug.")
+            # Check if entire matrices are identical
+            if profit_heatmap_train['matrix'] == profit_heatmap_valid['matrix']:
+                logger.error(f"[VIZ_DATA] ERROR: Train and Valid profit matrices are completely identical! This is a critical bug.")
+        
+        # Check if valid profit and profit_factor are identical (they definitely shouldn't be!)
+        if valid_matrix_sample == factor_matrix_sample and valid_matrix_sample is not None:
+            logger.error(f"[VIZ_DATA] ERROR: Valid profit and profit_factor heatmaps have identical sample values! This is a bug.")
+            if profit_heatmap_valid['matrix'] == profit_factor_heatmap_valid['matrix']:
+                logger.error(f"[VIZ_DATA] ERROR: Valid profit and profit_factor matrices are completely identical! This is a critical bug.")
         
         result = {
             'profit_heatmap_train': profit_heatmap_train,
@@ -822,7 +907,18 @@ def _transform_visualization_data(train_results: list[dict], validation_results:
         }
         
         # Convert numpy types to native Python types
-        return _convert_numpy_types(result)
+        converted_result = _convert_numpy_types(result)
+        
+        # Final verification after conversion
+        if 'profit_heatmap_train' in converted_result and 'profit_heatmap_valid' in converted_result:
+            train_id = id(converted_result['profit_heatmap_train'])
+            valid_id = id(converted_result['profit_heatmap_valid'])
+            factor_id = id(converted_result['profit_factor_heatmap_valid'])
+            logger.debug(f"[VIZ_DATA] Object IDs after conversion - Train: {train_id}, Valid: {valid_id}, Factor: {factor_id}")
+            if train_id == valid_id or train_id == factor_id or valid_id == factor_id:
+                logger.error(f"[VIZ_DATA] ERROR: Heatmap objects share the same memory address! This is a bug.")
+        
+        return converted_result
     except Exception as e:
         logger.error(f"Error transforming visualization data: {e}", exc_info=True)
         return {}
@@ -848,6 +944,7 @@ def run_grid_search(
     test_ratio: float = Query(0.15, description="Test set ratio"),
     top_n: int = Query(10, description="Top N train combos to consider for selection"),
     min_trade_count: int = Query(200, description="Minimum trades required for valid combo"),
+    max_games: Optional[int] = Query(None, description="Limit number of games for testing (default: no limit)"),
 ) -> dict[str, Any]:
     """
     Start a grid search hyperparameter optimization.
@@ -904,6 +1001,7 @@ def run_grid_search(
         test_ratio=test_ratio,
         top_n=top_n,
         min_trade_count=min_trade_count,
+        max_games=max_games,
         seed=seed
     )
     
@@ -962,6 +1060,7 @@ def run_grid_search(
             test_ratio,
             top_n,
             min_trade_count,
+            max_games,
             workers,
             seed,
             dsn

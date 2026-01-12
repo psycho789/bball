@@ -202,7 +202,7 @@ pip install matplotlib seaborn scipy
 
 2. **Generate plots and pattern summary**:
    ```bash
-   python scripts/analyze_grid_search_results.py \
+   python scripts/trade/analyze_grid_search_results.py \
      --results-dir grid_search_results/ \
      --output-dir grid_search_results/
    ```
@@ -229,5 +229,38 @@ pip install matplotlib seaborn scipy
 - `plots/marginal_effects.png`: Parameter sensitivity
 - `plots/tradeoff_scatter.png`: Frequency vs. profitability trade-off
 - `plots/profit_factor_heatmap_valid.png`: Risk-adjusted performance
+
+## HTML Export and GitHub Pages Deployment
+
+The webapp includes functionality to export the aggregate statistics dashboard as a standalone HTML file for GitHub Pages deployment.
+
+### Exporting HTML
+
+1. Start the webapp (see webapp documentation)
+2. Navigate to the Aggregate Statistics page
+3. Click the "Export HTML" button
+4. The HTML file will be saved to `docs/aggregate-stats.html`
+
+### Deploying to GitHub Pages
+
+After exporting, you can deploy the dashboard to GitHub Pages for public access:
+
+1. **Commit and push the exported file**:
+   ```bash
+   git add docs/aggregate-stats.html
+   git commit -m "Export aggregate statistics dashboard"
+   git push origin main
+   ```
+
+2. **Configure GitHub Pages**:
+   - Go to repository Settings → Pages
+   - Set Source to: Branch `main`, Folder `/docs`
+   - Click Save
+
+3. **Access your dashboard**:
+   - URL: `https://[username].github.io/[repository-name]/aggregate-stats.html`
+   - GitHub Pages will automatically rebuild when you push updates
+
+For detailed instructions, see [docs/GITHUB_PAGES_DEPLOYMENT.md](docs/GITHUB_PAGES_DEPLOYMENT.md).
 
 

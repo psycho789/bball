@@ -92,14 +92,17 @@ async function getAggregateStats(season = "2025-26") {
     return fetchJSON(`/api/stats/aggregate?season=${encodeURIComponent(season)}`);
 }
 
-async function getModelEvaluation(seasonStart = 2024, allSeasons = false) {
-    if (allSeasons) {
-        return fetchJSON(`/api/stats/model-evaluation?all_seasons=true`);
-    } else if (seasonStart === null) {
-        return fetchJSON(`/api/stats/model-evaluation?all_seasons=true`);
+async function getModelEvaluation(seasonStart = 2024, allSeasons = false, modelType = null) {
+    let url = '/api/stats/model-evaluation?';
+    if (allSeasons || seasonStart === null) {
+        url += 'all_seasons=true';
     } else {
-        return fetchJSON(`/api/stats/model-evaluation?season_start=${seasonStart}`);
+        url += `season_start=${seasonStart}`;
     }
+    if (modelType) {
+        url += `&model_type=${modelType}`;
+    }
+    return fetchJSON(url);
 }
 
 async function runSimulationApi(gameId, entryThreshold, exitThreshold, excludeFirstSeconds, excludeLastSeconds, betAmount) {

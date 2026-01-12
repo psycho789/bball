@@ -16,20 +16,40 @@ async function loadAggregateStats() {
     
     try {
         console.log('[FRONTEND] Fetching aggregate stats...');
-        const [stats, modelEval2024, modelEvalAll] = await Promise.allSettled([
+        // Fetch all 4 models for 2024 season
+        const [stats, modelEval2024LogregPlatt, modelEval2024LogregIsotonic, modelEval2024CatboostPlatt, modelEval2024CatboostIsotonic, modelEvalAll] = await Promise.allSettled([
             getAggregateStats('2025-26'),
-            getModelEvaluation(2024).catch(() => null),  // Don't fail if evaluation not available
-            getModelEvaluation(null, true).catch(() => null)  // All seasons
+            getModelEvaluation(2024, false, 'logreg_platt').catch(err => { console.error('[FRONTEND] Logreg+Platt fetch error:', err); return null; }),
+            getModelEvaluation(2024, false, 'logreg_isotonic').catch(err => { console.error('[FRONTEND] Logreg+Isotonic fetch error:', err); return null; }),
+            getModelEvaluation(2024, false, 'catboost_platt').catch(err => { console.error('[FRONTEND] CatBoost+Platt fetch error:', err); return null; }),
+            getModelEvaluation(2024, false, 'catboost_isotonic').catch(err => { console.error('[FRONTEND] CatBoost+Isotonic fetch error:', err); return null; }),
+            getModelEvaluation(null, true).catch(err => { console.error('[FRONTEND] All seasons fetch error:', err); return null; })
         ]);
         
         const statsData = stats.status === 'fulfilled' ? stats.value : null;
-        // Extract evalData - use value directly if fulfilled, otherwise null
-        const evalData2024 = modelEval2024.status === 'fulfilled' ? modelEval2024.value : null;
-        const evalDataAll = modelEvalAll.status === 'fulfilled' ? modelEvalAll.value : null;
+        // Extract evalData - check if fulfilled AND value is not null
+        const evalData2024LogregPlatt = (modelEval2024LogregPlatt.status === 'fulfilled' && modelEval2024LogregPlatt.value !== null) ? modelEval2024LogregPlatt.value : null;
+        const evalData2024LogregIsotonic = (modelEval2024LogregIsotonic.status === 'fulfilled' && modelEval2024LogregIsotonic.value !== null) ? modelEval2024LogregIsotonic.value : null;
+        const evalData2024CatboostPlatt = (modelEval2024CatboostPlatt.status === 'fulfilled' && modelEval2024CatboostPlatt.value !== null) ? modelEval2024CatboostPlatt.value : null;
+        const evalData2024CatboostIsotonic = (modelEval2024CatboostIsotonic.status === 'fulfilled' && modelEval2024CatboostIsotonic.value !== null) ? modelEval2024CatboostIsotonic.value : null;
+        const evalDataAll = (modelEvalAll.status === 'fulfilled' && modelEvalAll.value !== null) ? modelEvalAll.value : null;
+        
+        // Debug logging - check what we actually received
+        console.log('[FRONTEND] Model evaluation data received:');
+        console.log('  Logreg+Platt status:', modelEval2024LogregPlatt.status, 'value:', evalData2024LogregPlatt ? `✓ (${evalData2024LogregPlatt.eval?.calibration_points?.length || 0} points)` : '✗ null');
+        console.log('  Logreg+Isotonic status:', modelEval2024LogregIsotonic.status, 'value:', evalData2024LogregIsotonic ? `✓ (${evalData2024LogregIsotonic.eval?.calibration_points?.length || 0} points)` : '✗ null');
+        console.log('  CatBoost+Platt status:', modelEval2024CatboostPlatt.status, 'value:', evalData2024CatboostPlatt ? `✓ (${evalData2024CatboostPlatt.eval?.calibration_points?.length || 0} points)` : '✗ null');
+        console.log('  CatBoost+Isotonic status:', modelEval2024CatboostIsotonic.status, 'value:', evalData2024CatboostIsotonic ? `✓ (${evalData2024CatboostIsotonic.eval?.calibration_points?.length || 0} points)` : '✗ null');
+        
+        // Log any rejected promises
+        if (modelEval2024LogregPlatt.status === 'rejected') console.error('  Logreg+Platt rejected:', modelEval2024LogregPlatt.reason);
+        if (modelEval2024LogregIsotonic.status === 'rejected') console.error('  Logreg+Isotonic rejected:', modelEval2024LogregIsotonic.reason);
+        if (modelEval2024CatboostPlatt.status === 'rejected') console.error('  CatBoost+Platt rejected:', modelEval2024CatboostPlatt.reason);
+        if (modelEval2024CatboostIsotonic.status === 'rejected') console.error('  CatBoost+Isotonic rejected:', modelEval2024CatboostIsotonic.reason);
         
         console.log('[FRONTEND] Stats received, rendering...');
-        // Pass both 2024 and all-seasons evaluation data
-        renderAggregateStats(statsData, evalData2024, evalDataAll);
+        // Pass all 4 models for 2024 season and all-seasons evaluation data
+        renderAggregateStats(statsData, evalData2024LogregPlatt, evalData2024LogregIsotonic, evalData2024CatboostPlatt, evalData2024CatboostIsotonic, evalDataAll);
     } catch (error) {
         console.error('[FRONTEND] Failed to load aggregate stats:', error);
         container.innerHTML = `
@@ -156,9 +176,16 @@ function renderChart(canvasId, chartType, chartData, options = {}) {
     return new Chart(ctx, config);
 }
 
-function renderAggregateStats(stats, modelEval2024 = null, modelEvalAll = null) {
+function renderAggregateStats(stats, modelEval2024LogregPlatt = null, modelEval2024LogregIsotonic = null, modelEval2024CatboostPlatt = null, modelEval2024CatboostIsotonic = null, modelEvalAll = null) {
     const container = document.getElementById('aggregateStatsContainer');
     if (!container || !stats) return;
+    
+    // Debug: Log what we received in renderAggregateStats
+    console.log('[FRONTEND] renderAggregateStats called with:');
+    console.log('  modelEval2024LogregPlatt:', modelEval2024LogregPlatt ? `✓ (${modelEval2024LogregPlatt.eval?.calibration_points?.length || 0} points)` : '✗ null');
+    console.log('  modelEval2024LogregIsotonic:', modelEval2024LogregIsotonic ? `✓ (${modelEval2024LogregIsotonic.eval?.calibration_points?.length || 0} points)` : '✗ null');
+    console.log('  modelEval2024CatboostPlatt:', modelEval2024CatboostPlatt ? `✓ (${modelEval2024CatboostPlatt.eval?.calibration_points?.length || 0} points)` : '✗ null');
+    console.log('  modelEval2024CatboostIsotonic:', modelEval2024CatboostIsotonic ? `✓ (${modelEval2024CatboostIsotonic.eval?.calibration_points?.length || 0} points)` : '✗ null');
     
     let html = `
         <div class="aggregate-stats-summary">
@@ -192,14 +219,44 @@ function renderAggregateStats(stats, modelEval2024 = null, modelEvalAll = null) 
         <div class="chart-container">
             <h4>Distribution Charts${createTooltip('These charts show how different metrics are spread across all games. They help us see patterns - like whether most games have similar accuracy, or if there are outliers.')}</h4>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px;">
-                <!-- Model Calibration Charts -->
-                ${modelEval2024 && modelEval2024.eval && modelEval2024.eval.calibration_points && modelEval2024.eval.calibration_points.length > 0 ? `
+                <!-- Model Calibration Charts - All 4 Models -->
+                ${modelEval2024LogregPlatt && modelEval2024LogregPlatt.eval && modelEval2024LogregPlatt.eval.calibration_points && modelEval2024LogregPlatt.eval.calibration_points.length > 0 ? `
                 <div>
                     <h5 style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px;">
-                        Win Probability Model Calibration (2024 Season)${createTooltip('Shows how well-calibrated the trained win probability model is on the 2024 season test set. Each point represents a probability bin. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated.')}
+                        ${modelEval2024LogregPlatt.model_label || 'Logistic Regression + Platt'} (2024 Season)${createTooltip('Shows how well-calibrated the Logistic Regression + Platt model is on the 2024 season test set. Each point represents a probability bin. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated.')}
                     </h5>
                     <div class="chart-wrapper">
-                        <canvas id="modelCalibrationChart2024"></canvas>
+                        <canvas id="modelCalibrationChart2024LogregPlatt"></canvas>
+                    </div>
+                </div>
+                ` : ''}
+                ${modelEval2024LogregIsotonic && modelEval2024LogregIsotonic.eval && modelEval2024LogregIsotonic.eval.calibration_points && modelEval2024LogregIsotonic.eval.calibration_points.length > 0 ? `
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px;">
+                        ${modelEval2024LogregIsotonic.model_label || 'Logistic Regression + Isotonic'} (2024 Season)${createTooltip('Shows how well-calibrated the Logistic Regression + Isotonic model is on the 2024 season test set. Each point represents a probability bin. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated.')}
+                    </h5>
+                    <div class="chart-wrapper">
+                        <canvas id="modelCalibrationChart2024LogregIsotonic"></canvas>
+                    </div>
+                </div>
+                ` : ''}
+                ${modelEval2024CatboostPlatt && modelEval2024CatboostPlatt.eval && modelEval2024CatboostPlatt.eval.calibration_points && modelEval2024CatboostPlatt.eval.calibration_points.length > 0 ? `
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px;">
+                        ${modelEval2024CatboostPlatt.model_label || 'CatBoost + Platt'} (2024 Season)${createTooltip('Shows how well-calibrated the CatBoost + Platt model is on the 2024 season test set. Each point represents a probability bin. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated.')}
+                    </h5>
+                    <div class="chart-wrapper">
+                        <canvas id="modelCalibrationChart2024CatboostPlatt"></canvas>
+                    </div>
+                </div>
+                ` : ''}
+                ${modelEval2024CatboostIsotonic && modelEval2024CatboostIsotonic.eval && modelEval2024CatboostIsotonic.eval.calibration_points && modelEval2024CatboostIsotonic.eval.calibration_points.length > 0 ? `
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px;">
+                        ${modelEval2024CatboostIsotonic.model_label || 'CatBoost + Isotonic'} (2024 Season)${createTooltip('Shows how well-calibrated the CatBoost + Isotonic model is on the 2024 season test set. Each point represents a probability bin. X-axis = average predicted probability in that bin, Y-axis = actual win rate. Points on the diagonal line (y=x) = perfectly calibrated.')}
+                    </h5>
+                    <div class="chart-wrapper">
+                        <canvas id="modelCalibrationChart2024CatboostIsotonic"></canvas>
                     </div>
                 </div>
                 ` : ''}
@@ -998,20 +1055,35 @@ function renderAggregateStats(stats, modelEval2024 = null, modelEvalAll = null) 
             });
         }
         
-        // Model Calibration Chart - 2024 Season
-        if (modelEval2024 && modelEval2024.eval && modelEval2024.eval.calibration_points && modelEval2024.eval.calibration_points.length > 0) {
-            console.log('[FRONTEND] Rendering model calibration chart (2024) with', modelEval2024.eval.calibration_points.length, 'points');
-            const calibrationPoints = modelEval2024.eval.calibration_points;
+        // Helper function to render a calibration chart
+        function renderCalibrationChart(canvasId, evalData, color, borderColor) {
+            console.log(`[FRONTEND] renderCalibrationChart called for ${canvasId}:`, {
+                hasEvalData: !!evalData,
+                hasEval: !!(evalData && evalData.eval),
+                hasCalibrationPoints: !!(evalData && evalData.eval && evalData.eval.calibration_points),
+                pointsLength: evalData && evalData.eval && evalData.eval.calibration_points ? evalData.eval.calibration_points.length : 0,
+                modelLabel: evalData?.model_label || 'N/A'
+            });
+            
+            if (!evalData || !evalData.eval || !evalData.eval.calibration_points || evalData.eval.calibration_points.length === 0) {
+                console.warn(`[FRONTEND] Skipping chart ${canvasId} - missing data`);
+                return;
+            }
+            
+            const calibrationPoints = evalData.eval.calibration_points;
             const minVal = 0;
             const maxVal = 1;
+            const modelLabel = evalData.model_label || 'Model';
             
-            renderChart('modelCalibrationChart2024', 'scatter', {
+            console.log(`[FRONTEND] Rendering ${modelLabel} calibration chart with`, calibrationPoints.length, 'points');
+            
+            renderChart(canvasId, 'scatter', {
                 datasets: [
                     {
-                        label: 'Model Calibration',
+                        label: modelLabel,
                         data: calibrationPoints.map(p => ({ x: p.x, y: p.y, n: p.n, gap: p.gap })),
-                        backgroundColor: 'rgba(124, 58, 237, 0.6)',
-                        borderColor: '#7c3aed',
+                        backgroundColor: color.replace(')', ', 0.6)').replace('rgb', 'rgba'),
+                        borderColor: borderColor,
                         pointRadius: calibrationPoints.map(p => {
                             // Size points by sample count
                             const n = p.n || 0;
@@ -1080,6 +1152,26 @@ function renderAggregateStats(stats, modelEval2024 = null, modelEvalAll = null) 
                 }
             });
         }
+        
+        // Render all 4 model calibration charts with distinct colors
+        console.log('[FRONTEND] Attempting to render 4 model charts...');
+        console.log('[FRONTEND] Checking canvas elements exist:');
+        console.log('  modelCalibrationChart2024LogregPlatt:', !!document.getElementById('modelCalibrationChart2024LogregPlatt'));
+        console.log('  modelCalibrationChart2024LogregIsotonic:', !!document.getElementById('modelCalibrationChart2024LogregIsotonic'));
+        console.log('  modelCalibrationChart2024CatboostPlatt:', !!document.getElementById('modelCalibrationChart2024CatboostPlatt'));
+        console.log('  modelCalibrationChart2024CatboostIsotonic:', !!document.getElementById('modelCalibrationChart2024CatboostIsotonic'));
+        
+        // Logistic Regression + Platt: Purple (#7c3aed)
+        renderCalibrationChart('modelCalibrationChart2024LogregPlatt', modelEval2024LogregPlatt, 'rgba(124, 58, 237, 0.6)', '#7c3aed');
+        
+        // Logistic Regression + Isotonic: Blue (#3b82f6)
+        renderCalibrationChart('modelCalibrationChart2024LogregIsotonic', modelEval2024LogregIsotonic, 'rgba(59, 130, 246, 0.6)', '#3b82f6');
+        
+        // CatBoost + Platt: Orange (#f7931a)
+        renderCalibrationChart('modelCalibrationChart2024CatboostPlatt', modelEval2024CatboostPlatt, 'rgba(247, 147, 26, 0.6)', '#f7931a');
+        
+        // CatBoost + Isotonic: Green (#10b981)
+        renderCalibrationChart('modelCalibrationChart2024CatboostIsotonic', modelEval2024CatboostIsotonic, 'rgba(16, 185, 129, 0.6)', '#10b981');
         
         // Model Calibration Chart - All Seasons
         if (modelEvalAll && modelEvalAll.eval && modelEvalAll.eval.calibration_points && modelEvalAll.eval.calibration_points.length > 0) {
@@ -1291,16 +1383,29 @@ function renderAggregateStats(stats, modelEval2024 = null, modelEvalAll = null) 
 
 // Store current stats data for export
 let currentStatsData = null;
-let currentModelEval2024 = null;
+let currentModelEval2024LogregPlatt = null;
+let currentModelEval2024LogregIsotonic = null;
+let currentModelEval2024CatboostPlatt = null;
+let currentModelEval2024CatboostIsotonic = null;
 let currentModelEvalAll = null;
 
 // Wrap renderAggregateStats to store data
 const originalRenderAggregateStats = renderAggregateStats;
-renderAggregateStats = function(stats, modelEval2024, modelEvalAll) {
+renderAggregateStats = function(stats, modelEval2024LogregPlatt, modelEval2024LogregIsotonic, modelEval2024CatboostPlatt, modelEval2024CatboostIsotonic, modelEvalAll) {
+    console.log('[FRONTEND] Wrapper function called with:', {
+        hasLogregPlatt: !!modelEval2024LogregPlatt,
+        hasLogregIsotonic: !!modelEval2024LogregIsotonic,
+        hasCatboostPlatt: !!modelEval2024CatboostPlatt,
+        hasCatboostIsotonic: !!modelEval2024CatboostIsotonic,
+    });
     currentStatsData = stats;
-    currentModelEval2024 = modelEval2024;
+    // Store all 4 models for export
+    currentModelEval2024LogregPlatt = modelEval2024LogregPlatt;
+    currentModelEval2024LogregIsotonic = modelEval2024LogregIsotonic;
+    currentModelEval2024CatboostPlatt = modelEval2024CatboostPlatt;
+    currentModelEval2024CatboostIsotonic = modelEval2024CatboostIsotonic;
     currentModelEvalAll = modelEvalAll;
-    return originalRenderAggregateStats(stats, modelEval2024, modelEvalAll);
+    return originalRenderAggregateStats(stats, modelEval2024LogregPlatt, modelEval2024LogregIsotonic, modelEval2024CatboostPlatt, modelEval2024CatboostIsotonic, modelEvalAll);
 };
 
 // HTML Export Function
@@ -1353,7 +1458,10 @@ ${cssContent}
     <script>
         // Embedded data
         const statsData = ${JSON.stringify(currentStatsData, null, 2)};
-        const modelEval2024 = ${JSON.stringify(currentModelEval2024, null, 2)};
+        const modelEval2024LogregPlatt = ${JSON.stringify(currentModelEval2024LogregPlatt, null, 2)};
+        const modelEval2024LogregIsotonic = ${JSON.stringify(currentModelEval2024LogregIsotonic, null, 2)};
+        const modelEval2024CatboostPlatt = ${JSON.stringify(currentModelEval2024CatboostPlatt, null, 2)};
+        const modelEval2024CatboostIsotonic = ${JSON.stringify(currentModelEval2024CatboostIsotonic, null, 2)};
         const modelEvalAll = ${JSON.stringify(currentModelEvalAll, null, 2)};
         
         // Chart rendering helper functions
@@ -1684,19 +1792,24 @@ ${cssContent}
                     });
                 }
                 
-                // Model Calibration Chart - 2024 Season
-                if (modelEval2024 && modelEval2024.eval && modelEval2024.eval.calibration_points && modelEval2024.eval.calibration_points.length > 0) {
-                    const calibrationPoints = modelEval2024.eval.calibration_points;
+                // Helper function to render a calibration chart
+                function renderCalibrationChart(canvasId, evalData, color, borderColor) {
+                    if (!evalData || !evalData.eval || !evalData.eval.calibration_points || evalData.eval.calibration_points.length === 0) {
+                        return;
+                    }
+                    
+                    const calibrationPoints = evalData.eval.calibration_points;
                     const minVal = 0;
                     const maxVal = 1;
+                    const modelLabel = evalData.model_label || 'Model';
                     
-                    renderChart('modelCalibrationChart2024', 'scatter', {
+                    renderChart(canvasId, 'scatter', {
                         datasets: [
                             {
-                                label: 'Model Calibration',
+                                label: modelLabel,
                                 data: calibrationPoints.map(p => ({ x: p.x, y: p.y, n: p.n, gap: p.gap })),
-                                backgroundColor: 'rgba(124, 58, 237, 0.6)',
-                                borderColor: '#7c3aed',
+                                backgroundColor: color.replace(')', ', 0.6)').replace('rgb', 'rgba'),
+                                borderColor: borderColor,
                                 pointRadius: calibrationPoints.map(p => {
                                     const n = p.n || 0;
                                     return Math.max(3, Math.min(10, 3 + (n / 10000)));
@@ -1764,6 +1877,19 @@ ${cssContent}
                         }
                     });
                 }
+                
+                // Render all 4 model calibration charts with distinct colors
+                // Logistic Regression + Platt: Purple (#7c3aed)
+                renderCalibrationChart('modelCalibrationChart2024LogregPlatt', modelEval2024LogregPlatt, 'rgba(124, 58, 237, 0.6)', '#7c3aed');
+                
+                // Logistic Regression + Isotonic: Blue (#3b82f6)
+                renderCalibrationChart('modelCalibrationChart2024LogregIsotonic', modelEval2024LogregIsotonic, 'rgba(59, 130, 246, 0.6)', '#3b82f6');
+                
+                // CatBoost + Platt: Orange (#f7931a)
+                renderCalibrationChart('modelCalibrationChart2024CatboostPlatt', modelEval2024CatboostPlatt, 'rgba(247, 147, 26, 0.6)', '#f7931a');
+                
+                // CatBoost + Isotonic: Green (#10b981)
+                renderCalibrationChart('modelCalibrationChart2024CatboostIsotonic', modelEval2024CatboostIsotonic, 'rgba(16, 185, 129, 0.6)', '#10b981');
                 
                 // Model Calibration Chart - All Seasons
                 if (modelEvalAll && modelEvalAll.eval && modelEvalAll.eval.calibration_points && modelEvalAll.eval.calibration_points.length > 0) {
@@ -1849,25 +1975,53 @@ ${cssContent}
         });
     </script>
 </body>
-</html>`;
+        </html>`;
         
-        // Download the file
-        const blob = new Blob([htmlContent], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `aggregate-stats-${new Date().toISOString().split('T')[0]}.html`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        // POST HTML content to backend to save to docs/ directory
+        try {
+            const response = await fetch('/api/export/html', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    html_content: htmlContent
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (!result.success) {
+                throw new Error(result.message || 'Export failed');
+            }
+            // Success - file saved silently
+        } catch (fetchError) {
+            console.error('Export error:', fetchError);
+            // Fallback to browser download if backend save fails
+            console.warn('Backend save failed, falling back to browser download');
+            try {
+                const blob = new Blob([htmlContent], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `aggregate-stats-${new Date().toISOString().split('T')[0]}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                alert('Backend save failed. File downloaded to your browser instead.');
+            } catch (downloadError) {
+                console.error('Download fallback also failed:', downloadError);
+                alert('Failed to export HTML: ' + (fetchError.message || 'Unknown error'));
+            }
+        }
     } catch (error) {
         console.error('Export error:', error);
         alert('Failed to export HTML: ' + error.message);
     }
 }
 
-// Image Export Function
+// Image Export Function with Section Selection
 async function exportToImage() {
     const container = document.getElementById('aggregateStatsContainer');
     if (!container) {
@@ -1875,7 +2029,65 @@ async function exportToImage() {
         return;
     }
     
+    // Show section selection dropdown
+    const selectedSections = await showSectionSelectionDialog(container);
+    if (!selectedSections) {
+        // User cancelled
+        return;
+    }
+    
     try {
+        // Hide sections that weren't selected
+        const hiddenElements = [];
+        
+        // Summary section
+        const summarySection = container.querySelector('.aggregate-stats-summary');
+        if (summarySection) {
+            if (!selectedSections.summary) {
+                summarySection.style.display = 'none';
+                hiddenElements.push(summarySection);
+            }
+        }
+        
+        // Chart container
+        const chartContainer = container.querySelector('.chart-container');
+        if (chartContainer) {
+            if (!selectedSections.charts) {
+                chartContainer.style.display = 'none';
+                hiddenElements.push(chartContainer);
+            }
+        }
+        
+        // ESPN Stats Section
+        const espnSection = Array.from(container.querySelectorAll('.stats-section')).find(section => {
+            const h3 = section.querySelector('h3');
+            return h3 && h3.textContent.includes('ESPN');
+        });
+        if (espnSection && !selectedSections.espn) {
+            espnSection.style.display = 'none';
+            hiddenElements.push(espnSection);
+        }
+        
+        // Kalshi Stats Section
+        const kalshiSection = Array.from(container.querySelectorAll('.stats-section')).find(section => {
+            const h3 = section.querySelector('h3');
+            return h3 && h3.textContent.includes('Kalshi');
+        });
+        if (kalshiSection && !selectedSections.kalshi) {
+            kalshiSection.style.display = 'none';
+            hiddenElements.push(kalshiSection);
+        }
+        
+        // Comparison Stats Section
+        const comparisonSection = Array.from(container.querySelectorAll('.stats-section')).find(section => {
+            const h3 = section.querySelector('h3');
+            return h3 && h3.textContent.includes('Comparison');
+        });
+        if (comparisonSection && !selectedSections.comparison) {
+            comparisonSection.style.display = 'none';
+            hiddenElements.push(comparisonSection);
+        }
+        
         // Remove all non-chart tooltips (individual stat tooltips)
         container.querySelectorAll('.stat-row-label .tooltip-icon, .summary-label .tooltip-icon').forEach(icon => {
             icon.remove();
@@ -1927,7 +2139,8 @@ async function exportToImage() {
         
         // Use html2canvas to capture
         if (typeof html2canvas === 'undefined') {
-            // Clean up added tooltips
+            // Clean up
+            hiddenElements.forEach(el => el.style.display = '');
             addedTooltips.forEach(el => el.remove());
             alert('Image export library not loaded. Please refresh the page.');
             return;
@@ -1945,7 +2158,8 @@ async function exportToImage() {
         
         // Convert to blob and download
         canvas.toBlob(function(blob) {
-            // Clean up added tooltips
+            // Clean up - restore hidden elements and remove added tooltips
+            hiddenElements.forEach(el => el.style.display = '');
             addedTooltips.forEach(el => el.remove());
             
             if (!blob) {
@@ -1966,6 +2180,189 @@ async function exportToImage() {
         console.error('Export error:', error);
         alert('Failed to export image: ' + error.message);
     }
+}
+
+// Show section selection dialog
+function showSectionSelectionDialog(container) {
+    return new Promise((resolve) => {
+        // Identify all major sections
+        const sections = [];
+        
+        // Summary section
+        const summarySection = container.querySelector('.aggregate-stats-summary');
+        if (summarySection) {
+            sections.push({
+                id: 'summary',
+                name: 'Summary Cards',
+                element: summarySection,
+                checked: true
+            });
+        }
+        
+        // Chart container
+        const chartContainer = container.querySelector('.chart-container');
+        if (chartContainer) {
+            sections.push({
+                id: 'charts',
+                name: 'Distribution Charts',
+                element: chartContainer,
+                checked: true
+            });
+        }
+        
+        // ESPN Stats Section
+        const espnSection = Array.from(container.querySelectorAll('.stats-section')).find(section => {
+            const h3 = section.querySelector('h3');
+            return h3 && h3.textContent.includes('ESPN');
+        });
+        if (espnSection) {
+            sections.push({
+                id: 'espn',
+                name: 'ESPN Aggregate Metrics',
+                element: espnSection,
+                checked: true
+            });
+        }
+        
+        // Kalshi Stats Section
+        const kalshiSection = Array.from(container.querySelectorAll('.stats-section')).find(section => {
+            const h3 = section.querySelector('h3');
+            return h3 && h3.textContent.includes('Kalshi');
+        });
+        if (kalshiSection) {
+            sections.push({
+                id: 'kalshi',
+                name: 'Kalshi Aggregate Metrics',
+                element: kalshiSection,
+                checked: true
+            });
+        }
+        
+        // Comparison Stats Section
+        const comparisonSection = Array.from(container.querySelectorAll('.stats-section')).find(section => {
+            const h3 = section.querySelector('h3');
+            return h3 && h3.textContent.includes('Comparison');
+        });
+        if (comparisonSection) {
+            sections.push({
+                id: 'comparison',
+                name: 'Comparison Metrics',
+                element: comparisonSection,
+                checked: true
+            });
+        }
+        
+        if (sections.length === 0) {
+            // No sections found, proceed with export
+            resolve({});
+            return;
+        }
+        
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        `;
+        
+        // Create dialog
+        const dialog = document.createElement('div');
+        dialog.style.cssText = `
+            background: var(--bg-primary, #1a1a2e);
+            border: 1px solid var(--border-color, #2a2a40);
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        `;
+        
+        dialog.innerHTML = `
+            <h3 style="margin: 0 0 16px 0; color: var(--text-primary, #e8e8f0); font-size: 1.25rem;">
+                Select Sections to Export
+            </h3>
+            <div style="margin-bottom: 20px;">
+                ${sections.map(section => `
+                    <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; margin-bottom: 4px; transition: background 0.2s;"
+                           onmouseover="this.style.background='rgba(255,255,255,0.05)'"
+                           onmouseout="this.style.background='transparent'">
+                        <input type="checkbox" 
+                               id="section-${section.id}" 
+                               data-section-id="${section.id}"
+                               ${section.checked ? 'checked' : ''}
+                               style="margin-right: 12px; cursor: pointer; width: 18px; height: 18px;">
+                        <span style="color: var(--text-primary, #e8e8f0); font-size: 0.95rem; flex: 1;">
+                            ${section.name}
+                        </span>
+                    </label>
+                `).join('')}
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                <button id="exportCancelBtn" 
+                        style="padding: 8px 16px; background: var(--bg-secondary, #2a2a40); 
+                               color: var(--text-primary, #e8e8f0); border: 1px solid var(--border-color, #2a2a40); 
+                               border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
+                    Cancel
+                </button>
+                <button id="exportConfirmBtn" 
+                        style="padding: 8px 16px; background: var(--accent-color, #7c3aed); 
+                               color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
+                    Export
+                </button>
+            </div>
+        `;
+        
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        
+        // Handle cancel
+        const cancelBtn = dialog.querySelector('#exportCancelBtn');
+        cancelBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+            resolve(null);
+        });
+        
+        // Handle confirm
+        const confirmBtn = dialog.querySelector('#exportConfirmBtn');
+        confirmBtn.addEventListener('click', () => {
+            const selected = {};
+            sections.forEach(section => {
+                const checkbox = dialog.querySelector(`#section-${section.id}`);
+                selected[section.id] = checkbox.checked;
+            });
+            
+            document.body.removeChild(overlay);
+            resolve(selected);
+        });
+        
+        // Close on overlay click (outside dialog)
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                document.body.removeChild(overlay);
+                resolve(null);
+            }
+        });
+        
+        // Close on Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                document.body.removeChild(overlay);
+                document.removeEventListener('keydown', handleEscape);
+                resolve(null);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+    });
 }
 
 // Helper function to get chart rendering code for HTML export

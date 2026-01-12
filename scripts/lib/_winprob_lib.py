@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
+from sklearn.isotonic import IsotonicRegression
 
 
 def utc_now_iso_compact() -> str:
@@ -137,6 +138,21 @@ class PlattCalibrator:
 
 
 @dataclass(frozen=True)
+class IsotonicCalibrator:
+    iso_reg: IsotonicRegression
+
+    def apply(self, p: np.ndarray) -> np.ndarray:
+        """Apply isotonic regression calibration to probabilities."""
+        # IsotonicRegression expects 1D array
+        p_1d = np.asarray(p).flatten()
+        calibrated = self.iso_reg.transform(p_1d)
+        # Clip to [0, 1] to ensure valid probabilities
+        calibrated = np.clip(calibrated, 0.0, 1.0)
+        # Return in same shape as input
+        return calibrated.reshape(p.shape)
+
+
+@dataclass(frozen=True)
 class WinProbArtifact:
     created_at_utc: str
     version: str
@@ -146,8 +162,11 @@ class WinProbArtifact:
     buckets_seconds_remaining: list[int]
     preprocess: PreprocessParams
     feature_names: list[str]
-    model: ModelParams
+    model: ModelParams  # For logistic regression
     platt: PlattCalibrator | None
+    isotonic: IsotonicCalibrator | None
+    model_type: str = "logreg"  # "logreg" or "catboost"
+    catboost_model_path: str | None = None  # Path to CatBoost .cbm file relative to artifact directory
 
 
 def encode_possession(pos: str) -> np.ndarray:
@@ -243,10 +262,46 @@ def build_design_matrix(
 
 
 def predict_proba(artifact: WinProbArtifact, *, X: np.ndarray) -> np.ndarray:
-    w = np.asarray(artifact.model.weights, dtype=np.float64)
-    logits = X @ w + float(artifact.model.intercept)
-    p = sigmoid(logits)
-    if artifact.platt is not None:
+    """Predict probabilities using either logistic regression or CatBoost model."""
+    if artifact.model_type == "catboost" and artifact.catboost_model_path is not None:
+        # Use CatBoost model
+        from catboost import CatBoostClassifier
+        # Resolve model path relative to artifact location
+        model_path = Path(artifact.catboost_model_path)
+        if not model_path.is_absolute():
+            # Try multiple locations: artifact's directory, data/models, artifacts
+            # First, try to get artifact directory from the calling context if available
+            # Otherwise, try common locations
+            possible_paths = [
+                Path("data/models") / model_path,
+                Path("artifacts") / model_path,
+                model_path,  # Current directory
+            ]
+            # If we have access to the artifact file path, use that
+            # For now, try data/models first (where we save models)
+            found = False
+            for possible_path in possible_paths:
+                if possible_path.exists():
+                    model_path = possible_path
+                    found = True
+                    break
+            if not found:
+                # Last resort: try data/models (most likely location)
+                model_path = Path("data/models") / model_path
+        model = CatBoostClassifier()
+        model.load_model(str(model_path))
+        # CatBoost returns probabilities for both classes, we want class 1 (home win)
+        p = model.predict_proba(X)[:, 1].astype(np.float64)
+    else:
+        # Use logistic regression (default)
+        w = np.asarray(artifact.model.weights, dtype=np.float64)
+        logits = X @ w + float(artifact.model.intercept)
+        p = sigmoid(logits)
+    
+    # Apply calibration: isotonic takes precedence if both are present (shouldn't happen, but handle gracefully)
+    if artifact.isotonic is not None:
+        p = artifact.isotonic.apply(p)
+    elif artifact.platt is not None:
         p = artifact.platt.apply(p)
     return p
 
@@ -361,6 +416,37 @@ def fit_platt_calibrator_on_probs(
     return PlattCalibrator(alpha=float(a), beta=float(b))
 
 
+def fit_isotonic_calibrator_on_probs(
+    *,
+    p_base: np.ndarray,
+    y: np.ndarray,
+) -> IsotonicCalibrator | None:
+    """
+    Fit isotonic regression calibration on base probabilities.
+    
+    Isotonic regression fits a piecewise constant non-decreasing function
+    to map base probabilities to calibrated probabilities.
+    
+    Args:
+        p_base: Base model probabilities (1D array)
+        y: True binary labels (1D array)
+    
+    Returns:
+        IsotonicCalibrator instance or None if insufficient data
+    """
+    if len(p_base) != len(y) or len(y) < 5:
+        return None
+    
+    p_base_1d = np.asarray(p_base).flatten()
+    y_1d = np.asarray(y).flatten()
+    
+    # Fit isotonic regression
+    iso_reg = IsotonicRegression(out_of_bounds='clip')
+    iso_reg.fit(p_base_1d, y_1d)
+    
+    return IsotonicCalibrator(iso_reg=iso_reg)
+
+
 def save_artifact(path: Path, artifact: WinProbArtifact) -> None:
     obj: dict[str, Any] = {
         "created_at_utc": artifact.created_at_utc,
@@ -393,6 +479,21 @@ def save_artifact(path: Path, artifact: WinProbArtifact) -> None:
             "tol": artifact.model.tol,
         },
         "platt": (None if artifact.platt is None else {"alpha": artifact.platt.alpha, "beta": artifact.platt.beta}),
+        "isotonic": (
+            None
+            if artifact.isotonic is None
+            else {
+                # Serialize isotonic regression: store X_min, X_max, and the piecewise constant function
+                "X_min": float(artifact.isotonic.iso_reg.X_min_),
+                "X_max": float(artifact.isotonic.iso_reg.X_max_),
+                # Store the piecewise constant function as (X_thresholds, y_thresholds)
+                "X_thresholds": [float(x) for x in artifact.isotonic.iso_reg.X_thresholds_],
+                "y_thresholds": [float(y) for y in artifact.isotonic.iso_reg.y_thresholds_],
+                "out_of_bounds": str(artifact.isotonic.iso_reg.out_of_bounds),
+            }
+        ),
+        "model_type": artifact.model_type,
+        "catboost_model_path": artifact.catboost_model_path,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, indent=2, sort_keys=False) + "\n", encoding="utf-8")
@@ -428,6 +529,24 @@ def load_artifact(path: Path) -> WinProbArtifact:
     platt = None
     if isinstance(platt_obj, dict):
         platt = PlattCalibrator(alpha=float(platt_obj["alpha"]), beta=float(platt_obj["beta"]))
+    
+    isotonic_obj = obj.get("isotonic")
+    isotonic = None
+    if isinstance(isotonic_obj, dict):
+        # Reconstruct IsotonicRegression from serialized parameters
+        out_of_bounds = isotonic_obj.get("out_of_bounds", "clip")
+        iso_reg = IsotonicRegression(out_of_bounds=out_of_bounds)
+        # Reconstruct by fitting with the stored X_thresholds and y_thresholds
+        # This will recreate the piecewise constant function
+        X_thresholds = np.array([float(x) for x in isotonic_obj["X_thresholds"]])
+        y_thresholds = np.array([float(y) for y in isotonic_obj["y_thresholds"]])
+        # Fit with the threshold points to reconstruct the model
+        iso_reg.fit(X_thresholds, y_thresholds)
+        isotonic = IsotonicCalibrator(iso_reg=iso_reg)
+    
+    model_type = obj.get("model_type", "logreg")  # Default to logreg for backward compatibility
+    catboost_model_path = obj.get("catboost_model_path")
+    
     return WinProbArtifact(
         created_at_utc=str(obj["created_at_utc"]),
         version=str(obj["version"]),
@@ -439,6 +558,9 @@ def load_artifact(path: Path) -> WinProbArtifact:
         feature_names=[str(x) for x in obj["feature_names"]],
         model=model,
         platt=platt,
+        isotonic=isotonic,
+        model_type=str(model_type),
+        catboost_model_path=(str(catboost_model_path) if catboost_model_path is not None else None),
     )
 
 

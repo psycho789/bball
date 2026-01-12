@@ -166,16 +166,27 @@ async function runGridSearch() {
         min_trade_count: parseInt(document.getElementById('minTradeCount').value)
     };
     
+    // Add max_games if provided (optional parameter)
+    const maxGamesInput = document.getElementById('maxGames').value;
+    if (maxGamesInput && maxGamesInput.trim() !== '') {
+        params.max_games = parseInt(maxGamesInput);
+    }
+    
+    // Store parameters for export
+    gridSearchParams = params;
+    
     // Show loading indicator
     document.getElementById('gridSearchLoading').style.display = 'flex';
     document.getElementById('runGridSearchBtn').disabled = true;
     document.getElementById('gridSearchResults').style.display = 'none';
     
     try {
-        // Build query string
+        // Build query string (skip undefined/null values for optional parameters)
         const queryParams = new URLSearchParams();
         Object.entries(params).forEach(([key, value]) => {
-            queryParams.append(key, value.toString());
+            if (value !== undefined && value !== null) {
+                queryParams.append(key, value.toString());
+            }
         });
         
         // Start grid search
@@ -353,6 +364,9 @@ async function fetchAndRenderResults(requestId) {
 }
 
 // Render grid search results
+// Store grid search parameters for export
+let gridSearchParams = null;
+
 /**
  * Export grid search results as an image
  */
@@ -373,6 +387,33 @@ async function exportGridSearchToImage() {
         // Wait for charts/canvases to be fully rendered
         await new Promise(resolve => setTimeout(resolve, 500));
         
+        // Collect current parameters from form (or use stored params)
+        const params = gridSearchParams || {
+            season: document.getElementById('season')?.value || 'N/A',
+            entry_min: parseFloat(document.getElementById('entryMin')?.value) || 0,
+            entry_max: parseFloat(document.getElementById('entryMax')?.value) || 0,
+            entry_step: parseFloat(document.getElementById('entryStep')?.value) || 0,
+            exit_min: parseFloat(document.getElementById('exitMin')?.value) || 0,
+            exit_max: parseFloat(document.getElementById('exitMax')?.value) || 0,
+            exit_step: parseFloat(document.getElementById('exitStep')?.value) || 0,
+            bet_amount: parseFloat(document.getElementById('betAmount')?.value) || 0,
+            enable_fees: document.getElementById('enableFees')?.checked || false,
+            slippage_rate: parseFloat(document.getElementById('slippageRate')?.value) || 0,
+            exclude_first_seconds: parseInt(document.getElementById('excludeFirstSeconds')?.value) || 0,
+            exclude_last_seconds: parseInt(document.getElementById('excludeLastSeconds')?.value) || 0,
+            use_trade_data: document.getElementById('useTradeData')?.checked || false,
+            train_ratio: parseFloat(document.getElementById('trainRatio')?.value) || 0,
+            valid_ratio: parseFloat(document.getElementById('validRatio')?.value) || 0,
+            test_ratio: parseFloat(document.getElementById('testRatio')?.value) || 0,
+            top_n: parseInt(document.getElementById('topN')?.value) || 0,
+            min_trade_count: parseInt(document.getElementById('minTradeCount')?.value) || 0
+        };
+        
+        const maxGamesInput = document.getElementById('maxGames')?.value;
+        if (maxGamesInput && maxGamesInput.trim() !== '') {
+            params.max_games = parseInt(maxGamesInput);
+        }
+        
         // Use html2canvas to capture
         if (typeof html2canvas === 'undefined') {
             alert('Image export library not loaded. Please refresh the page.');
@@ -387,7 +428,7 @@ async function exportGridSearchToImage() {
             width: container.scrollWidth,
             height: container.scrollHeight,
             allowTaint: true,
-            // Ensure canvas elements are visible in cloned document
+            // Ensure canvas elements are visible in cloned document and add parameters
             onclone: function(clonedDoc) {
                 const clonedContainer = clonedDoc.querySelector('#gridSearchResults');
                 if (clonedContainer) {
@@ -397,6 +438,52 @@ async function exportGridSearchToImage() {
                         canvas.style.display = 'block';
                         canvas.style.visibility = 'visible';
                     });
+                    
+                    // Create parameters info box at the top
+                    const paramsBox = clonedDoc.createElement('div');
+                    paramsBox.id = 'exportParamsBox';
+                    paramsBox.style.cssText = `
+                        background: #1a1a2e;
+                        border: 2px solid #2a2a40;
+                        border-radius: 8px;
+                        padding: 1rem;
+                        margin-bottom: 1.5rem;
+                        color: #e8e8f0;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-size: 11px;
+                        line-height: 1.6;
+                    `;
+                    
+                    // Format parameters text
+                    const paramsText = `
+                        <div style="font-weight: bold; margin-bottom: 0.5rem; font-size: 12px; color: #00d4aa;">
+                            Grid Search Parameters
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem;">
+                            <div><strong>Season:</strong> ${params.season}</div>
+                            <div><strong>Entry Range:</strong> ${params.entry_min.toFixed(3)} - ${params.entry_max.toFixed(3)} (step: ${params.entry_step.toFixed(3)})</div>
+                            <div><strong>Exit Range:</strong> ${params.exit_min.toFixed(3)} - ${params.exit_max.toFixed(3)} (step: ${params.exit_step.toFixed(3)})</div>
+                            <div><strong>Bet Amount:</strong> $${params.bet_amount.toFixed(2)}</div>
+                            <div><strong>Fees:</strong> ${params.enable_fees ? 'Enabled' : 'Disabled'}</div>
+                            <div><strong>Slippage Rate:</strong> ${(params.slippage_rate * 100).toFixed(2)}%</div>
+                            <div><strong>Exclude First:</strong> ${params.exclude_first_seconds}s</div>
+                            <div><strong>Exclude Last:</strong> ${params.exclude_last_seconds}s</div>
+                            <div><strong>Data Source:</strong> ${params.use_trade_data ? 'Trade Data' : 'Candlesticks'}</div>
+                            <div><strong>Train/Valid/Test:</strong> ${(params.train_ratio * 100).toFixed(0)}% / ${(params.valid_ratio * 100).toFixed(0)}% / ${(params.test_ratio * 100).toFixed(0)}%</div>
+                            <div><strong>Top N:</strong> ${params.top_n}</div>
+                            <div><strong>Min Trade Count:</strong> ${params.min_trade_count}</div>
+                            ${params.max_games ? `<div><strong>Max Games:</strong> ${params.max_games}</div>` : ''}
+                        </div>
+                    `;
+                    paramsBox.innerHTML = paramsText;
+                    
+                    // Insert at the top of the container
+                    const firstChild = clonedContainer.firstChild;
+                    if (firstChild) {
+                        clonedContainer.insertBefore(paramsBox, firstChild);
+                    } else {
+                        clonedContainer.appendChild(paramsBox);
+                    }
                 }
             }
         });
@@ -521,19 +608,33 @@ function renderPatternSummary(patterns) {
 
 // Render visualizations
 function renderVisualizations(vizData) {
+    console.log('[GridSearch] Rendering visualizations, data keys:', Object.keys(vizData));
+    
     // Profit heatmap (TRAIN)
     if (vizData.profit_heatmap_train) {
+        console.log('[GridSearch] Rendering TRAIN profit heatmap, sample value:', 
+            vizData.profit_heatmap_train.matrix?.[0]?.[0]);
         renderProfitHeatmap(vizData.profit_heatmap_train, 'profitHeatmapTrainCanvas');
+    } else {
+        console.warn('[GridSearch] Missing profit_heatmap_train data');
     }
     
     // Profit heatmap (VALID)
     if (vizData.profit_heatmap_valid) {
+        console.log('[GridSearch] Rendering VALID profit heatmap, sample value:', 
+            vizData.profit_heatmap_valid.matrix?.[0]?.[0]);
         renderProfitHeatmap(vizData.profit_heatmap_valid, 'profitHeatmapValidCanvas');
+    } else {
+        console.warn('[GridSearch] Missing profit_heatmap_valid data');
     }
     
     // Profit factor heatmap (VALID)
     if (vizData.profit_factor_heatmap_valid) {
+        console.log('[GridSearch] Rendering VALID profit_factor heatmap, sample value:', 
+            vizData.profit_factor_heatmap_valid.matrix?.[0]?.[0]);
         renderProfitHeatmap(vizData.profit_factor_heatmap_valid, 'profitFactorHeatmapCanvas');
+    } else {
+        console.warn('[GridSearch] Missing profit_factor_heatmap_valid data');
     }
     
     // Marginal effects
@@ -575,6 +676,64 @@ function renderProfitHeatmap(data, canvasId) {
         });
     });
     
+    // Use a diverging colormap centered at zero (like matplotlib's RdYlGn)
+    // This provides better contrast: dark red (low) -> yellow (zero) -> dark green (high)
+    function getRdYlGnColor(value, minVal, maxVal) {
+        // For diverging colormap, center around zero if we have both positive and negative values
+        // Otherwise, use full range but with better color distribution
+        const range = maxVal - minVal;
+        const absMax = Math.max(Math.abs(minVal), Math.abs(maxVal));
+        
+        let normalized;
+        if (minVal < 0 && maxVal > 0) {
+            // Center around zero for diverging colormap
+            normalized = (value + absMax) / (2 * absMax);
+        } else {
+            // All positive or all negative - use standard normalization
+            normalized = (value - minVal) / range;
+        }
+        
+        // Clamp to [0, 1]
+        normalized = Math.max(0, Math.min(1, normalized));
+        
+        // RdYlGn colormap approximation (Red-Yellow-Green diverging)
+        // Dark Red: RGB(165, 0, 38) for very low values
+        // Red: RGB(215, 48, 39) 
+        // Yellow: RGB(255, 255, 191) for middle values  
+        // Light Green: RGB(145, 207, 96)
+        // Dark Green: RGB(26, 152, 80) for high values
+        
+        let r, g, b;
+        
+        if (normalized < 0.25) {
+            // Dark Red to Red
+            const t = normalized / 0.25;
+            r = Math.round(165 + (215 - 165) * t);
+            g = Math.round(0 + (48 - 0) * t);
+            b = Math.round(38 + (39 - 38) * t);
+        } else if (normalized < 0.5) {
+            // Red to Yellow
+            const t = (normalized - 0.25) / 0.25;
+            r = Math.round(215 + (255 - 215) * t);
+            g = Math.round(48 + (255 - 48) * t);
+            b = Math.round(39 + (191 - 39) * t);
+        } else if (normalized < 0.75) {
+            // Yellow to Light Green
+            const t = (normalized - 0.5) / 0.25;
+            r = Math.round(255 - (255 - 145) * t);
+            g = Math.round(255 - (255 - 207) * t);
+            b = Math.round(191 + (96 - 191) * t);
+        } else {
+            // Light Green to Dark Green
+            const t = (normalized - 0.75) / 0.25;
+            r = Math.round(145 - (145 - 26) * t);
+            g = Math.round(207 - (207 - 152) * t);
+            b = Math.round(96 + (80 - 96) * t);
+        }
+        
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+    
     const cellWidth = canvas.width / entryThresh.length;
     const cellHeight = canvas.height / exitThresh.length;
     
@@ -584,19 +743,7 @@ function renderProfitHeatmap(data, canvasId) {
             if (val === null || val === undefined) {
                 ctx.fillStyle = '#f0f0f0';
             } else {
-                // Color scale: red (negative) -> yellow (zero) -> green (positive)
-                const normalized = (val - minVal) / (maxVal - minVal);
-                let r, g, b;
-                if (val < 0) {
-                    r = 255;
-                    g = Math.round(255 * (1 + normalized));
-                    b = 0;
-                } else {
-                    r = Math.round(255 * (1 - normalized));
-                    g = 255;
-                    b = 0;
-                }
-                ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                ctx.fillStyle = getRdYlGnColor(val, minVal, maxVal);
             }
             ctx.fillRect(entryIdx * cellWidth, (exitThresh.length - 1 - exitIdx) * cellHeight, cellWidth, cellHeight);
         });

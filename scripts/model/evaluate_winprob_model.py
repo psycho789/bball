@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
 """
-Evaluate a saved win-probability pipeline artifact on a held-out season (and optionally a forward-time season).
+Evaluate a saved win-probability pipeline artifact on a held-out season.
 
 This script:
 - loads the artifact JSON
-- scores snapshot rows
+- scores snapshot rows from ESPN tables
 - reports overall metrics and per-bucket metrics
 - writes a JSON report (and optionally a calibration SVG without external plotting libs)
 
+For detailed usage instructions, see: cursor-files/docs/evaluate_winprob_model_guide.md
+
 Usage:
-  ./.venv/bin/python scripts/evaluate_winprob_model.py \
+  ./.venv/bin/python scripts/model/evaluate_winprob_model.py \
     --artifact artifacts/winprob_logreg_v1.json \
-    --snapshots-parquet data/exports/winprob_snapshots_60s.parquet \
     --season-start 2024 \
     --out data/reports/winprob_eval_2024.json \
-    --plot-calibration
+    --plot-calibration \
+    --verbose \
+    --workers 4
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Any
+
+try:
+    import cairosvg
+    CAIROSVG_AVAILABLE = True
+except ImportError:
+    CAIROSVG_AVAILABLE = False
 
 import numpy as np
 import pandas as pd
@@ -46,13 +57,19 @@ from scripts.lib._winprob_lib import (
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Evaluate win-prob model artifact on a season_start split.")
+    p = argparse.ArgumentParser(
+        description="Evaluate win-prob model artifact on a season_start split.",
+        epilog="For detailed usage instructions, see: cursor-files/docs/evaluate_winprob_model_guide.md"
+    )
     p.add_argument("--artifact", required=True, help="Artifact JSON path.")
     p.add_argument("--dsn", help="Database connection string (or use DATABASE_URL env var)")
     p.add_argument("--season-start", type=int, required=True, help="Season_start to evaluate (e.g. 2024).")
     p.add_argument("--out", required=True, help="Output JSON report path.")
     p.add_argument("--bins", type=int, default=20, help="Bins for ECE/reliability (default: 20).")
     p.add_argument("--plot-calibration", action="store_true", help="Write an SVG reliability diagram next to the JSON report.")
+    p.add_argument("--verbose", action="store_true", help="Enable verbose logging with detailed progress information.")
+    p.add_argument("--workers", type=int, default=1, help="Number of parallel workers for per-bucket metrics (default: 1, no parallelization). NOTE: Currently not implemented due to artifact pickling limitations.")
+    p.add_argument("--disable-calibration", action="store_true", help="Evaluate model without Platt calibration (for comparison).")
     return p.parse_args()
 
 
@@ -126,6 +143,47 @@ def _write_calibration_svg(*, rows: list[dict[str, Any]], out_path: Path, title:
         )
     parts.append("</svg>")
     out_path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+
+
+def _convert_svg_to_jpeg(svg_path: Path, jpeg_path: Path, quality: int = 90) -> None:
+    """
+    Convert SVG file to JPEG using cairosvg.
+    
+    Args:
+        svg_path: Path to input SVG file
+        jpeg_path: Path to output JPEG file
+        quality: JPEG quality (1-100, default: 90)
+    """
+    if not CAIROSVG_AVAILABLE:
+        raise ImportError("cairosvg is required for JPEG generation. Install with: pip install cairosvg")
+    
+    if not svg_path.exists():
+        raise FileNotFoundError(f"SVG file not found: {svg_path}")
+    
+    # Read SVG content
+    svg_content = svg_path.read_text(encoding="utf-8")
+    
+    # Convert SVG to PNG first (cairosvg doesn't directly support JPEG)
+    # Then convert PNG to JPEG using PIL
+    from io import BytesIO
+    from PIL import Image
+    
+    # Convert SVG to PNG bytes
+    png_bytes = cairosvg.svg2png(bytestring=svg_content.encode("utf-8"))
+    
+    # Convert PNG to JPEG
+    img = Image.open(BytesIO(png_bytes))
+    # Convert RGBA to RGB if needed
+    if img.mode == "RGBA":
+        # Create white background
+        rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+        rgb_img.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+        img = rgb_img
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+    
+    # Save as JPEG
+    img.save(jpeg_path, "JPEG", quality=quality, optimize=True)
 
 
 def _write_calibration_context_svg(
@@ -434,27 +492,70 @@ def _load_evaluation_data(conn, season_start: int, artifact) -> pd.DataFrame:
     return df
 
 
+def _setup_logging(verbose: bool) -> None:
+    """Configure logging based on verbose flag."""
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+
+
+
 def main() -> int:
     args = parse_args()
     artifact_path = Path(args.artifact)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     dsn = get_dsn(args.dsn)
+    
+    _setup_logging(bool(args.verbose))
+    logger = logging.getLogger(__name__)
+    
+    start_time = time.time()
+    logger.info(f"Starting evaluation: artifact={artifact_path}, season_start={args.season_start}")
 
     art = load_artifact(artifact_path)
+    logger.debug(f"Loaded artifact: version={art.version}, created_at={art.created_at_utc}")
+    
+    # Handle disable-calibration flag
+    if bool(args.disable_calibration):
+        logger.info("Disabling Platt calibration (evaluating base model only)")
+        from scripts.lib._winprob_lib import WinProbArtifact
+        art = WinProbArtifact(
+            created_at_utc=art.created_at_utc,
+            version=art.version,
+            train_season_start_max=art.train_season_start_max,
+            calib_season_start=art.calib_season_start,
+            test_season_start=art.test_season_start,
+            buckets_seconds_remaining=art.buckets_seconds_remaining,
+            preprocess=art.preprocess,
+            feature_names=art.feature_names,
+            model=art.model,
+            platt=None,  # Disable calibration
+        )
 
     # Load evaluation data from database
     ss = int(args.season_start)
+    logger.info(f"Loading evaluation data for season_start={ss}")
+    load_start = time.time()
     with connect(dsn) as conn:
         df = _load_evaluation_data(conn, ss, art)
+    logger.debug(f"Loaded {len(df)} rows from database in {time.time() - load_start:.2f}s")
 
     df = df[df["final_winning_team"].notna()].copy()
+    logger.debug(f"After filtering for final_winning_team: {len(df)} rows")
     if len(df) == 0:
         raise SystemExit(f"No rows found for season_start={ss}")
 
     y = (df["final_winning_team"].astype(int) == 0).astype(int).to_numpy(dtype=np.float64)
+    logger.debug(f"Labels: {np.sum(y)} home wins, {len(y) - np.sum(y)} away wins")
     
     # Build design matrix with optional interaction terms
+    logger.info("Building design matrix")
+    matrix_start = time.time()
     build_matrix_kwargs = {
         "point_differential": df["point_differential"].to_numpy(),
         "time_remaining_regulation": df["time_remaining_regulation"].to_numpy(),
@@ -464,6 +565,7 @@ def main() -> int:
     
     # Add interaction terms if present in artifact
     use_interaction_terms = any("scaled" in fn and ("score_diff_div_sqrt" in fn or "espn_home_prob" in fn or "period" in fn) for fn in art.feature_names)
+    logger.debug(f"Using interaction terms: {use_interaction_terms}")
     if use_interaction_terms:
         if "score_diff_div_sqrt_time_remaining" in df.columns:
             build_matrix_kwargs["score_diff_div_sqrt_time_remaining"] = df["score_diff_div_sqrt_time_remaining"].astype(float).to_numpy()
@@ -477,9 +579,17 @@ def main() -> int:
             build_matrix_kwargs["period"] = df["period"].astype(int).tolist()
     
     X = build_design_matrix(**build_matrix_kwargs)
+    logger.debug(f"Design matrix shape: {X.shape}, built in {time.time() - matrix_start:.2f}s")
+    
+    logger.info("Making predictions")
+    predict_start = time.time()
     p = predict_proba(art, X=X)
+    logger.debug(f"Predictions completed in {time.time() - predict_start:.2f}s")
+    logger.debug(f"Prediction stats: mean={np.mean(p):.4f}, std={np.std(p):.4f}, min={np.min(p):.4f}, max={np.max(p):.4f}")
 
     # Overall metrics
+    logger.info("Calculating overall metrics")
+    metrics_start = time.time()
     overall = {
         "n": int(len(df)),
         "logloss": logloss(p, y),
@@ -488,8 +598,11 @@ def main() -> int:
         "ece_binned": ece_binned(p, y, bins=int(args.bins)),
         "prevalence_home_win": float(np.mean(y)),
     }
+    logger.debug(f"Overall metrics calculated in {time.time() - metrics_start:.2f}s")
+    logger.info(f"Overall metrics: logloss={overall['logloss']:.6f}, brier={overall['brier']:.6f}, ece={overall['ece_binned']:.6f}, auc={overall['roc_auc']:.6f}")
 
     # Calibration bins
+    logger.info(f"Calculating calibration bins (bins={args.bins})")
     bins = max(1, int(args.bins))
     idx = np.minimum(bins - 1, np.maximum(0, np.floor(p * bins).astype(np.int32)))
     calib_rows: list[dict[str, Any]] = []
@@ -503,10 +616,23 @@ def main() -> int:
         lo = b / bins
         hi = (b + 1) / bins
         calib_rows.append({"bin": int(b), "range": [float(lo), float(hi)], "n": int(nb), "avg_p": avg_p, "obs_rate": obs, "gap": float(obs - avg_p)})
+    logger.debug(f"Created {len(calib_rows)} calibration bins")
 
     # Per-bucket metrics (bucket_seconds_remaining)
+    logger.info("Calculating per-bucket metrics")
+    bucket_start = time.time()
+    unique_buckets = sorted(df["bucket_seconds_remaining"].astype(int).unique().tolist(), reverse=True)
+    logger.debug(f"Found {len(unique_buckets)} unique time buckets")
+    
     per_bucket: list[dict[str, Any]] = []
-    for b in sorted(df["bucket_seconds_remaining"].astype(int).unique().tolist(), reverse=True):
+    workers = max(1, int(args.workers))
+    
+    if workers > 1:
+        logger.warning(f"--workers={workers} specified but parallel processing not yet implemented (artifact pickling limitations). Using sequential processing.")
+    
+    for i, b in enumerate(unique_buckets):
+        if (i + 1) % 10 == 0:
+            logger.debug(f"Processing bucket {i+1}/{len(unique_buckets)}: {b} seconds remaining")
         sub = df[df["bucket_seconds_remaining"].astype(int) == int(b)]
         yb = (sub["final_winning_team"].astype(int) == 0).astype(int).to_numpy(dtype=np.float64)
         
@@ -543,6 +669,8 @@ def main() -> int:
                 "prevalence_home_win": float(np.mean(yb)),
             }
         )
+    
+    logger.debug(f"Per-bucket metrics calculated in {time.time() - bucket_start:.2f}s")
 
     report = {
         "created_at_utc": utc_now_iso_compact(),
@@ -554,6 +682,8 @@ def main() -> int:
             "calib_season_start": art.calib_season_start,
             "test_season_start": art.test_season_start,
             "buckets_seconds_remaining": art.buckets_seconds_remaining,
+            "model_type": art.model_type,
+            "catboost_model_path": art.catboost_model_path,
         },
         "eval": {
             "season_start": ss,
@@ -562,20 +692,34 @@ def main() -> int:
             "per_bucket_seconds_remaining": per_bucket,
         },
     }
+    logger.info("Writing JSON report")
     out_path.write_text(json.dumps(report, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     print(f"Wrote {out_path}")
     print(f"overall logloss={overall['logloss']} brier={overall['brier']} ece={overall['ece_binned']} auc={overall['roc_auc']}")
+    logger.info(f"Evaluation completed in {time.time() - start_time:.2f}s")
 
     if bool(args.plot_calibration):
+        logger.info("Generating calibration plots")
         svg_path = out_path.with_suffix(".calibration.svg")
         _write_calibration_svg(rows=calib_rows, out_path=svg_path, title=f"WinProb Calibration — season_start={ss} n={overall['n']}")
         print(f"Wrote {svg_path}")
+        
+        # Generate JPEG version
+        if CAIROSVG_AVAILABLE:
+            jpeg_path = out_path.with_suffix(".calibration.jpg")
+            try:
+                _convert_svg_to_jpeg(svg_path, jpeg_path)
+                print(f"Wrote {jpeg_path}")
+            except Exception as e:
+                logger.warning(f"Failed to generate JPEG: {e}")
 
         # Also write a context-rich SVG so the plot is self-contained for analysis.
         ctx_path = out_path.with_suffix(".calibration_context.svg")
-        platt = "none"
+        calibration_info = "none"
         if art.platt is not None:
-            platt = f"alpha={art.platt.alpha} beta={art.platt.beta}"
+            calibration_info = f"Platt: alpha={art.platt.alpha:.6f} beta={art.platt.beta:.6f}"
+        elif art.isotonic is not None:
+            calibration_info = "Isotonic: fitted"
         summary_lines = [
             f"season_start={ss}",
             f"n={overall['n']}",
@@ -589,7 +733,7 @@ def main() -> int:
             f"artifact_created_at_utc={art.created_at_utc}",
             f"train_season_start_max={art.train_season_start_max}",
             f"calib_season_start={art.calib_season_start}",
-            f"platt={platt}",
+            f"calibration={calibration_info}",
         ]
         _write_calibration_context_svg(
             calibration_rows=calib_rows,
@@ -598,6 +742,17 @@ def main() -> int:
             summary_lines=summary_lines,
         )
         print(f"Wrote {ctx_path}")
+        
+        # Generate JPEG version of context plot
+        if CAIROSVG_AVAILABLE:
+            ctx_jpeg_path = out_path.with_suffix(".calibration_context.jpg")
+            try:
+                _convert_svg_to_jpeg(ctx_path, ctx_jpeg_path)
+                print(f"Wrote {ctx_jpeg_path}")
+            except Exception as e:
+                logger.warning(f"Failed to generate context JPEG: {e}")
+        
+        logger.debug("Calibration plots generated")
 
     return 0
 

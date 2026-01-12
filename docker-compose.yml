@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:16
+    container_name: bball-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bball_warehouse
+      POSTGRES_USER: adamvoliva
+      POSTGRES_PASSWORD: bball
+    ports:
+      - "5432:5432"
+    volumes:
+      - bball_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adamvoliva -d bball_warehouse"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  bball_postgres_data:
+
+

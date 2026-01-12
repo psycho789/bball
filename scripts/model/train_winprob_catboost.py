@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Train a regularized logistic regression win-probability model from canonical dataset, and save a full pipeline artifact.
+Train a CatBoost win-probability model from canonical dataset, and save a full pipeline artifact.
 
-This script uses only the repo's existing dependencies (numpy/pandas), avoiding scikit-learn.
+This script uses CatBoost for gradient boosting, which can automatically find interaction terms.
 
 Inputs:
 - Canonical dataset: derived.snapshot_features_v1 (via DATABASE_URL)
@@ -16,13 +16,14 @@ Features (prediction-time):
 - point_differential (home - away)
 - time_remaining_regulation
 - possession ("home"|"away"|"unknown")
+- Optional interaction terms
 
 Label:
 - y_home_win = 1 if final_winning_team == 0 else 0
 
 Usage:
-  ./.venv/bin/python scripts/train_winprob_logreg.py \
-    --out-artifact artifacts/winprob_logreg_v1.json \
+  ./.venv/bin/python scripts/model/train_winprob_catboost.py \
+    --out-artifact artifacts/winprob_catboost_v1.json \
     --dsn "$DATABASE_URL"
 """
 
@@ -35,16 +36,16 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from catboost import CatBoostClassifier
 
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from scripts.lib._db_lib import get_dsn, connect
 from scripts.lib._winprob_lib import (
     PreprocessParams,
-    ModelParams,
+    ModelParams,  # Still needed for artifact structure, but won't be used for prediction
     WinProbArtifact,
     build_design_matrix,
-    fit_logistic_regression_irls,
     fit_platt_calibrator_on_probs,
     fit_isotonic_calibrator_on_probs,
     load_artifact,
@@ -68,7 +69,7 @@ def _calculate_buckets(time_remaining: pd.Series, step_seconds: int) -> list[int
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Train a leak-proof logistic regression win-probability model.")
+    p = argparse.ArgumentParser(description="Train a leak-proof CatBoost win-probability model.")
     p.add_argument("--out-artifact", required=True, help="Output artifact JSON path.")
     p.add_argument("--dsn", help="Database connection string (or use DATABASE_URL env var)")
     p.add_argument("--version", default="v1", help="Artifact version string (default: v1).")
@@ -77,9 +78,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--calibration-method", choices=["platt", "isotonic"], default="platt", help="Calibration method: 'platt' or 'isotonic' (default: platt).")
     p.add_argument("--disable-calibration", action="store_true", help="Disable calibration even if calibration season exists.")
     p.add_argument("--test-season-start", type=int, default=2024, help="Held-out test season_start (default: 2024).")
-    p.add_argument("--l2-lambda", type=float, default=1.0, help="L2 regularization strength (lambda) (default: 1.0).")
-    p.add_argument("--max-iter", type=int, default=50, help="IRLS max iterations (default: 50).")
-    p.add_argument("--tol", type=float, default=1e-8, help="IRLS stopping tolerance (default: 1e-8).")
+    p.add_argument("--iterations", type=int, default=1000, help="CatBoost iterations (default: 1000).")
+    p.add_argument("--depth", type=int, default=6, help="CatBoost tree depth (default: 6).")
+    p.add_argument("--learning-rate", type=float, default=0.1, help="CatBoost learning rate (default: 0.1).")
     p.add_argument("--min-train-rows", type=int, default=1000, help="Minimum training rows required (default: 1000).")
     p.add_argument("--bucket-step-seconds", type=int, default=60, help="Bucket step in seconds for artifact metadata (default: 60).")
     p.add_argument("--use-interaction-terms", action="store_true", default=True, help="Use interaction terms from canonical dataset (default: True).")
@@ -100,105 +101,121 @@ def _load_training_data(conn, train_season_start_max: int, test_season_start: in
     - score_diff -> point_differential
     - time_remaining -> time_remaining_regulation
     - possession -> 'unknown' (not reliably available)
-    - final_winning_team (from scoreboard_games join)
-    - season_label -> season_start (extract year from "2025-26" -> 2025)
-    
-    If use_interaction_terms=True, also calculates:
-    - score_diff_div_sqrt_time_remaining
-    - espn_home_prob (normalized to 0-1)
-    - espn_home_prob_lag_1 (using window function)
-    - espn_home_prob_delta_1 (current - lag_1)
-    - period (calculated from time_remaining)
     """
-    # Base query: ESPN probabilities + game state
-    base_query = """
-    WITH espn_base AS (
-        SELECT 
-            p.season_label,
-            p.game_id,
-            p.sequence_number,
-            -- Normalize probabilities to 0-1 format
-            CASE 
-                WHEN p.home_win_percentage > 1.0 THEN p.home_win_percentage / 100.0
-                ELSE p.home_win_percentage
-            END AS espn_home_prob,
-            -- Game state from prob_event_state
-            e.point_differential AS score_diff,
-            e.time_remaining,
-            e.home_score,
-            e.away_score,
-            -- Calculate period from time_remaining
-            CASE 
-                WHEN e.time_remaining IS NULL THEN NULL
-                WHEN e.time_remaining > 2160 THEN 1  -- Q1: 2160-2880 seconds
-                WHEN e.time_remaining > 1440 THEN 2  -- Q2: 1440-2160 seconds
-                WHEN e.time_remaining > 720 THEN 3   -- Q3: 720-1440 seconds
-                ELSE 4                               -- Q4: 0-720 seconds
-            END AS period
+    # Use the same query structure as train_winprob_logreg.py
+    if use_interaction_terms:
+        query = """
+        WITH espn_base AS (
+            SELECT
+                p.game_id,
+                p.sequence_number,
+                p.season_label,
+                CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) AS season_start,
+                e.point_differential AS score_diff,
+                e.time_remaining,
+                CASE 
+                    WHEN e.time_remaining IS NULL THEN NULL
+                    WHEN e.time_remaining > 2160 THEN 1
+                    WHEN e.time_remaining > 1440 THEN 2
+                    WHEN e.time_remaining > 720 THEN 3
+                    ELSE 4
+                END AS period,
+                CASE 
+                    WHEN p.home_win_percentage > 1.0 THEN p.home_win_percentage / 100.0
+                    ELSE p.home_win_percentage
+                END AS espn_home_prob
         FROM espn.probabilities_raw_items p
         LEFT JOIN espn.prob_event_state e 
             ON p.game_id = e.game_id 
             AND p.event_id = e.event_id
         WHERE e.time_remaining IS NOT NULL
             AND e.point_differential IS NOT NULL
-    ),
-    espn_with_features AS (
-        SELECT 
-            *,
-            -- Interaction term: score_diff / sqrt(time_remaining + 1)
-            CASE 
-                WHEN time_remaining IS NOT NULL AND time_remaining > 0 THEN
-                    score_diff::NUMERIC / SQRT(time_remaining::NUMERIC + 1.0)
-                ELSE NULL
-            END AS score_diff_div_sqrt_time_remaining,
-            -- Lagged probabilities using window functions
-            LAG(espn_home_prob) OVER (
-                PARTITION BY season_label, game_id 
-                ORDER BY sequence_number
-            ) AS espn_home_prob_lag_1,
-            -- Delta (current - lag_1)
-            espn_home_prob - LAG(espn_home_prob) OVER (
-                PARTITION BY season_label, game_id 
-                ORDER BY sequence_number
-            ) AS espn_home_prob_delta_1
-        FROM espn_base
-    )
-    SELECT DISTINCT ON (e.season_label, e.game_id, e.sequence_number)
-        e.season_label,
-        e.game_id,
-        e.sequence_number,
-        e.score_diff AS point_differential,
-        e.time_remaining AS time_remaining_regulation,
-        e.home_score,
-        e.away_score,
-        'unknown' AS possession,
-        CASE 
-            WHEN sg.home_score > sg.away_score THEN 0
-            WHEN sg.away_score > sg.home_score THEN 1
-            ELSE NULL
-        END AS final_winning_team,
-        CAST(SUBSTRING(e.season_label FROM '^([0-9]{4})') AS INTEGER) AS season_start
-    """
-    
-    # Add interaction terms if enabled
-    if use_interaction_terms:
-        interaction_select = """
-        ,
-        e.score_diff_div_sqrt_time_remaining,
-        e.espn_home_prob,
-        e.espn_home_prob_lag_1,
-        e.espn_home_prob_delta_1,
-        e.period
-        """
+            AND (CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) <= {train_season_start_max}
+                 OR CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) = {test_season_start}
+                 OR (CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) = {calib_season_start} AND {calib_season_start} IS NOT NULL))
+              AND (CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) <= {train_season_start_max}
+                   OR CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) = {test_season_start}
+                   OR (CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) = {calib_season_start} AND {calib_season_start} IS NOT NULL))
+        ),
+        espn_with_lag AS (
+            SELECT
+                *,
+                LAG(espn_home_prob, 1) OVER (PARTITION BY game_id ORDER BY sequence_number) AS espn_home_prob_lag_1
+            FROM espn_base
+        ),
+        espn_with_features AS (
+            SELECT DISTINCT ON (e.season_label, e.game_id, e.sequence_number)
+                e.season_start,
+                e.season_label,
+                e.game_id,
+                e.sequence_number,
+                e.score_diff AS point_differential,
+                e.time_remaining AS time_remaining_regulation,
+                'unknown' AS possession,
+                CASE 
+                    WHEN sg.home_score > sg.away_score THEN 0
+                    WHEN sg.away_score > sg.home_score THEN 1
+                    ELSE NULL
+                END AS final_winning_team,
+                e.score_diff / NULLIF(SQRT(e.time_remaining + 1), 0) AS score_diff_div_sqrt_time_remaining,
+                e.espn_home_prob,
+                e.espn_home_prob_lag_1,
+                e.espn_home_prob - e.espn_home_prob_lag_1 AS espn_home_prob_delta_1,
+                e.period,
+                CASE 
+                    WHEN e.time_remaining IS NOT NULL THEN
+                        (FLOOR(e.time_remaining / 60.0) * 60)::INTEGER
+                    ELSE NULL
+                END AS bucket_seconds_remaining
+            FROM espn_with_lag e
+            LEFT JOIN espn.scoreboard_games sg 
+                ON e.game_id = sg.event_id
+            WHERE sg.home_score IS NOT NULL 
+              AND sg.away_score IS NOT NULL
+        )
+        SELECT
+            e.season_start,
+            e.season_label,
+            e.game_id,
+            e.sequence_number,
+            e.point_differential,
+            e.time_remaining_regulation,
+            e.possession,
+            e.final_winning_team,
+            e.score_diff_div_sqrt_time_remaining,
+            e.espn_home_prob,
+            e.espn_home_prob_lag_1,
+            e.espn_home_prob_delta_1,
+            e.period,
+            e.bucket_seconds_remaining
+        FROM espn_with_features e
+        ORDER BY e.season_label, e.game_id, e.sequence_number
+        """.format(
+            train_season_start_max=train_season_start_max,
+            test_season_start=test_season_start,
+            calib_season_start=calib_season_start if calib_season_start is not None else 'NULL'
+        )
     else:
-        interaction_select = ""
-    
-    query = base_query + interaction_select + """
-    FROM espn_with_features e
-    LEFT JOIN espn.scoreboard_games sg 
-        ON e.game_id = sg.event_id
-    ORDER BY e.season_label, e.game_id, e.sequence_number
-    """
+        query = base_query.format(
+            train_season_start_max=train_season_start_max,
+            test_season_start=test_season_start,
+            calib_season_start=calib_season_start if calib_season_start is not None else 'NULL'
+        ) + """
+        SELECT
+            e.season_start,
+            e.season_label,
+            e.game_id,
+            e.sequence_number,
+            e.point_differential,
+            e.time_remaining_regulation,
+            e.possession,
+            e.final_winning_team,
+            e.bucket_seconds_remaining
+        FROM espn_with_features e
+        LEFT JOIN espn.scoreboard_games sg 
+            ON e.game_id = sg.event_id
+        ORDER BY e.season_label, e.game_id, e.sequence_number
+        """
     
     # Suppress pandas warning about psycopg connection (it works fine, just not officially supported)
     with warnings.catch_warnings():
@@ -372,14 +389,6 @@ def main() -> int:
     X_train = build_design_matrix(**build_matrix_kwargs)
     y_train = y[train_mask]
 
-    weights, intercept = fit_logistic_regression_irls(
-        X=X_train,
-        y=y_train,
-        l2_lambda=float(args.l2_lambda),
-        max_iter=int(args.max_iter),
-        tol=float(args.tol),
-    )
-
     # Feature ordering by contract (base + optional interaction terms)
     feature_names = [
         "point_differential_scaled",
@@ -402,10 +411,22 @@ def main() -> int:
         if "period" in df.columns:
             feature_names.extend(["period_1", "period_2", "period_3", "period_4"])
 
-    # Optional calibration on calibration season (Platt or Isotonic).
-    platt = None
-    isotonic = None
-    if not bool(args.disable_calibration) and calib_season_start is not None and int(np.sum(calib_mask)) >= 5:
+    # Train CatBoost model
+    print("Training CatBoost model...", file=sys.stderr)
+    model = CatBoostClassifier(
+        iterations=int(args.iterations),
+        depth=int(args.depth),
+        learning_rate=float(args.learning_rate),
+        loss_function='Logloss',
+        eval_metric='AUC',
+        verbose=100,
+        random_seed=42,
+        allow_writing_files=False,  # Don't write temp files
+    )
+    
+    # Prepare calibration set if available
+    eval_set = None
+    if calib_season_start is not None and int(np.sum(calib_mask)) >= 5:
         calib_matrix_kwargs = {
             "point_differential": df.loc[calib_mask, "point_differential"].to_numpy(),
             "time_remaining_regulation": df.loc[calib_mask, "time_remaining_regulation"].to_numpy(),
@@ -427,28 +448,26 @@ def main() -> int:
                 calib_matrix_kwargs["period"] = df.loc[calib_mask, "period"].astype(int).tolist()
         
         X_calib = build_design_matrix(**calib_matrix_kwargs)
-        # Base model probabilities (no calibration yet).
-        base_model = ModelParams(
-            weights=[float(x) for x in weights.tolist()],
-            intercept=float(intercept),
-            l2_lambda=float(args.l2_lambda),
-            max_iter=int(args.max_iter),
-            tol=float(args.tol),
-        )
-        tmp_art = WinProbArtifact(
-            created_at_utc=utc_now_iso_compact(),
-            version=str(args.version),
-            train_season_start_max=int(args.train_season_start_max),
-            calib_season_start=calib_season_start,
-            test_season_start=int(args.test_season_start),
-            buckets_seconds_remaining=_calculate_buckets(df["time_remaining_regulation"], args.bucket_step_seconds),
-            preprocess=preprocess,
-            feature_names=feature_names,
-            model=base_model,
-            platt=None,
-            isotonic=None,
-        )
-        p_base = predict_proba(tmp_art, X=X_calib)
+        y_calib = y[calib_mask]
+        eval_set = (X_calib, y_calib)
+    
+    model.fit(X_train, y_train, eval_set=eval_set)
+    print("CatBoost training completed.", file=sys.stderr)
+
+    # Save CatBoost model to .cbm file
+    catboost_model_path = out_path.with_suffix(".cbm")
+    model.save_model(str(catboost_model_path))
+    print(f"Saved CatBoost model to {catboost_model_path}", file=sys.stderr)
+    
+    # Store relative path in artifact
+    catboost_model_path_rel = catboost_model_path.name  # Just the filename, assume same directory
+
+    # Optional calibration on calibration season (Platt or Isotonic).
+    platt = None
+    isotonic = None
+    if not bool(args.disable_calibration) and calib_season_start is not None and int(np.sum(calib_mask)) >= 5:
+        # Get base model probabilities for calibration
+        p_base = model.predict_proba(X_calib)[:, 1].astype(np.float64)
         y_calib = y[calib_mask]
         
         # Fit calibration based on method
@@ -457,12 +476,13 @@ def main() -> int:
         else:  # default to platt
             platt = fit_platt_calibrator_on_probs(p_base=p_base, y=y_calib)
 
-    model = ModelParams(
-        weights=[float(x) for x in weights.tolist()],
-        intercept=float(intercept),
-        l2_lambda=float(args.l2_lambda),
-        max_iter=int(args.max_iter),
-        tol=float(args.tol),
+    # Create dummy ModelParams for artifact structure (not used for CatBoost prediction)
+    model_params = ModelParams(
+        weights=[0.0] * len(feature_names),  # Dummy weights
+        intercept=0.0,  # Dummy intercept
+        l2_lambda=0.0,
+        max_iter=0,
+        tol=0.0,
     )
 
     artifact = WinProbArtifact(
@@ -474,9 +494,11 @@ def main() -> int:
         buckets_seconds_remaining=_calculate_buckets(df["time_remaining_regulation"], args.bucket_step_seconds),
         preprocess=preprocess,
         feature_names=feature_names,
-        model=model,
+        model=model_params,  # Dummy, not used for CatBoost
         platt=platt,
         isotonic=isotonic,
+        model_type="catboost",
+        catboost_model_path=catboost_model_path_rel,
     )
 
     save_artifact(out_path, artifact)
@@ -488,5 +510,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
