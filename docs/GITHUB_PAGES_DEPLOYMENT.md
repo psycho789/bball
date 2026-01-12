@@ -93,6 +93,28 @@ https://adamvoliva.github.io/bball/aggregate-stats.html
    - All data is visible
    - The styling matches the webapp version
 
+## Model Comparison Dashboard
+
+The webapp also supports exporting a Model Comparison dashboard that shows all 4 models (Logistic Regression/CatBoost × Platt/Isotonic) side-by-side.
+
+### Exporting Model Comparison
+
+1. Navigate to the Model Comparison page in the webapp (`#/model-comparison`)
+2. Click the "Export HTML" button
+3. The file is saved to `docs/model-comparison.html`
+
+### Accessing Model Comparison on GitHub Pages
+
+After pushing to GitHub, the Model Comparison dashboard will be available at:
+```
+https://[username].github.io/[repository-name]/model-comparison.html
+```
+
+**Example**: If your username is `adamvoliva` and repository is `bball`, the URL would be:
+```
+https://adamvoliva.github.io/bball/model-comparison.html
+```
+
 ## Updating the Dashboard
 
 To update the dashboard with new data:

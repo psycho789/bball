@@ -409,6 +409,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (route.view === 'grid-search') {
         // We're on the grid search page
         await showGridSearchPageView();
+    } else if (route.view === 'model-comparison') {
+        // We're on the model comparison page
+        await showModelComparisonPageView();
     } else {
         // We're on the list view
         // Note: showGameListView() already calls initializeGamesList() internally

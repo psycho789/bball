@@ -7,7 +7,7 @@ Big O: O(n) where n is HTML content size
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -20,15 +20,16 @@ logger = get_logger(__name__)
 class HTMLExportRequest(BaseModel):
     """Request model for HTML export."""
     html_content: str
+    filename: Optional[str] = "aggregate-stats.html"
 
 
 @router.post("/export/html")
 def export_html(request: HTMLExportRequest) -> dict[str, Any]:
     """
-    Save HTML content to docs/aggregate-stats.html for GitHub Pages deployment.
+    Save HTML content to docs/ directory for GitHub Pages deployment.
     
     Args:
-        request: JSON body containing html_content field
+        request: JSON body containing html_content and optional filename fields
         
     Returns:
         Success response with file path, or error response
@@ -45,8 +46,8 @@ def export_html(request: HTMLExportRequest) -> dict[str, Any]:
         # Create docs/ directory if it doesn't exist
         docs_dir.mkdir(exist_ok=True)
         
-        # Save HTML content to docs/aggregate-stats.html
-        output_file = docs_dir / "aggregate-stats.html"
+        # Save HTML content to docs/ with specified filename (default: aggregate-stats.html)
+        output_file = docs_dir / request.filename
         output_file.write_text(request.html_content, encoding="utf-8")
         
         logger.info(f"HTML export saved successfully to {output_file}")

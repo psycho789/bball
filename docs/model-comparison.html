@@ -1,4 +1,10 @@
-:root {
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Comparison - 2×2 Matrix</title>
+    <style>:root {
     --bg-primary: #0a0a0f;
     --bg-secondary: #12121a;
     --bg-card: #18182a;
@@ -3201,3 +3207,668 @@ h5 {
         font-size: 0.875rem;
     }
 }
+</style>
+    
+            <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+            <script>
+                // Embedded comparison data
+                const comparisonData = {
+  "models": [
+    {
+      "model_label": "Logistic Regression + Platt",
+      "model_color": "#7c3aed",
+      "metrics": {
+        "logloss": 0.46233765508610264,
+        "brier": 0.15439897987422008,
+        "ece": 0.022156191014754148,
+        "auc": 0.8562253885590061,
+        "n": 660185
+      },
+      "calibration_points": [
+        {
+          "x": 0.019155805935287772,
+          "y": 0.009316696375519904,
+          "n": 42075
+        },
+        {
+          "x": 0.07506130939746426,
+          "y": 0.0680825119398435,
+          "n": 29523
+        },
+        {
+          "x": 0.1256870650680045,
+          "y": 0.1357389414472002,
+          "n": 31288
+        },
+        {
+          "x": 0.17475521472999314,
+          "y": 0.2070284406668846,
+          "n": 30590
+        },
+        {
+          "x": 0.22456084007338495,
+          "y": 0.28043234923744226,
+          "n": 28588
+        },
+        {
+          "x": 0.2747419032061811,
+          "y": 0.322533795106692,
+          "n": 26853
+        },
+        {
+          "x": 0.32464800250969383,
+          "y": 0.3664997261131544,
+          "n": 25558
+        },
+        {
+          "x": 0.3748238032507287,
+          "y": 0.4088546994557879,
+          "n": 24439
+        },
+        {
+          "x": 0.42483832404403254,
+          "y": 0.4480896504121158,
+          "n": 24629
+        },
+        {
+          "x": 0.47543052247352185,
+          "y": 0.49149720537519326,
+          "n": 25227
+        },
+        {
+          "x": 0.524998704606891,
+          "y": 0.5238315773223727,
+          "n": 25911
+        },
+        {
+          "x": 0.5749882662331077,
+          "y": 0.5658882082695252,
+          "n": 26120
+        },
+        {
+          "x": 0.6253788046296452,
+          "y": 0.6030987969376594,
+          "n": 27430
+        },
+        {
+          "x": 0.6753708478717078,
+          "y": 0.6463000445984425,
+          "n": 29149
+        },
+        {
+          "x": 0.7254959417059123,
+          "y": 0.6689901976038587,
+          "n": 32135
+        },
+        {
+          "x": 0.7754983202750242,
+          "y": 0.7364022662889519,
+          "n": 35300
+        },
+        {
+          "x": 0.8256902965038236,
+          "y": 0.8071807205261607,
+          "n": 40748
+        },
+        {
+          "x": 0.8747189799934209,
+          "y": 0.8797119506683843,
+          "n": 47353
+        },
+        {
+          "x": 0.9249922859393999,
+          "y": 0.9361091007779989,
+          "n": 44216
+        },
+        {
+          "x": 0.9808105125680975,
+          "y": 0.9893898783563034,
+          "n": 63053
+        }
+      ]
+    },
+    {
+      "model_label": "Logistic Regression + Isotonic",
+      "model_color": "#3b82f6",
+      "metrics": {
+        "logloss": 0.46251472539619104,
+        "brier": 0.15399937875881528,
+        "ece": 0.012659334675941717,
+        "auc": 0.8561859508948237,
+        "n": 660185
+      },
+      "calibration_points": [
+        {
+          "x": 0.013128713290030534,
+          "y": 0.012937563110063952,
+          "n": 47536
+        },
+        {
+          "x": 0.07590104887869094,
+          "y": 0.060625,
+          "n": 14400
+        },
+        {
+          "x": 0.11899206752146324,
+          "y": 0.121603502531126,
+          "n": 36545
+        },
+        {
+          "x": 0.17335812821411695,
+          "y": 0.19699665948612283,
+          "n": 32031
+        },
+        {
+          "x": 0.21888382659700498,
+          "y": 0.2682785219591092,
+          "n": 24113
+        },
+        {
+          "x": 0.27185983302385125,
+          "y": 0.3113389378716424,
+          "n": 24385
+        },
+        {
+          "x": 0.3224137143223795,
+          "y": 0.3411729857819905,
+          "n": 16880
+        },
+        {
+          "x": 0.37318011048011457,
+          "y": 0.3739992161693074,
+          "n": 17861
+        },
+        {
+          "x": 0.4153298117787539,
+          "y": 0.42024054818151324,
+          "n": 41738
+        },
+        {
+          "x": 0.4723038173788335,
+          "y": 0.48493803622497617,
+          "n": 31470
+        },
+        {
+          "x": 0.5239133636917264,
+          "y": 0.5311281940233867,
+          "n": 36944
+        },
+        {
+          "x": 0.5733370667829073,
+          "y": 0.5775167903231478,
+          "n": 28439
+        },
+        {
+          "x": 0.6223789151434774,
+          "y": 0.6229881211310022,
+          "n": 29885
+        },
+        {
+          "x": 0.6763999451394862,
+          "y": 0.6589711417816813,
+          "n": 23910
+        },
+        {
+          "x": 0.722668397298661,
+          "y": 0.6803869246164109,
+          "n": 29980
+        },
+        {
+          "x": 0.7789442841325788,
+          "y": 0.7580144094123868,
+          "n": 45387
+        },
+        {
+          "x": 0.8187924512953015,
+          "y": 0.8273655396907598,
+          "n": 27034
+        },
+        {
+          "x": 0.8776407652722696,
+          "y": 0.8785457451058729,
+          "n": 40048
+        },
+        {
+          "x": 0.9168121390158428,
+          "y": 0.9274562864279767,
+          "n": 38432
+        },
+        {
+          "x": 0.9911472624616322,
+          "y": 0.9846788852898164,
+          "n": 73167
+        }
+      ]
+    },
+    {
+      "model_label": "CatBoost + Platt",
+      "model_color": "#f7931a",
+      "metrics": {
+        "logloss": 0.4505693472789605,
+        "brier": 0.15089613693454512,
+        "ece": 0.011158592440768512,
+        "auc": 0.8615444826863906,
+        "n": 660185
+      },
+      "calibration_points": [
+        {
+          "x": 0.01094113685275293,
+          "y": 0.014942785088095524,
+          "n": 58289
+        },
+        {
+          "x": 0.0756075415396992,
+          "y": 0.07335577789368865,
+          "n": 21089
+        },
+        {
+          "x": 0.12581091103906375,
+          "y": 0.13845510317902956,
+          "n": 21516
+        },
+        {
+          "x": 0.17510404139628047,
+          "y": 0.18412743972445464,
+          "n": 20904
+        },
+        {
+          "x": 0.22566294518956687,
+          "y": 0.2414739941899797,
+          "n": 25129
+        },
+        {
+          "x": 0.27451419863248433,
+          "y": 0.30825082508250823,
+          "n": 28785
+        },
+        {
+          "x": 0.3253471560347425,
+          "y": 0.3512142751369762,
+          "n": 27012
+        },
+        {
+          "x": 0.37513992443349575,
+          "y": 0.38991115695604434,
+          "n": 30053
+        },
+        {
+          "x": 0.42452806526452025,
+          "y": 0.44257693831726325,
+          "n": 30284
+        },
+        {
+          "x": 0.47494808699734736,
+          "y": 0.48964770783143047,
+          "n": 28641
+        },
+        {
+          "x": 0.5248225297766653,
+          "y": 0.5263906228325704,
+          "n": 28836
+        },
+        {
+          "x": 0.5753378199283924,
+          "y": 0.5822818791946309,
+          "n": 29800
+        },
+        {
+          "x": 0.6251225579737432,
+          "y": 0.6217081199707388,
+          "n": 32808
+        },
+        {
+          "x": 0.6748309000492162,
+          "y": 0.6542644892329875,
+          "n": 31903
+        },
+        {
+          "x": 0.724887656822861,
+          "y": 0.7053631359914082,
+          "n": 29796
+        },
+        {
+          "x": 0.7755097438084438,
+          "y": 0.7597683094443354,
+          "n": 30558
+        },
+        {
+          "x": 0.825205426699519,
+          "y": 0.8130838443463809,
+          "n": 34898
+        },
+        {
+          "x": 0.8740030532654532,
+          "y": 0.8790276803899963,
+          "n": 29949
+        },
+        {
+          "x": 0.9251175481980246,
+          "y": 0.9338291091212627,
+          "n": 32945
+        },
+        {
+          "x": 0.9873440898774725,
+          "y": 0.9850097712380733,
+          "n": 86990
+        }
+      ]
+    },
+    {
+      "model_label": "CatBoost + Isotonic",
+      "model_color": "#10b981",
+      "metrics": {
+        "logloss": 0.45194219116039086,
+        "brier": 0.1511222930479507,
+        "ece": 0.015381406416837624,
+        "auc": 0.8614666646469337,
+        "n": 660185
+      },
+      "calibration_points": [
+        {
+          "x": 0.007947085671773884,
+          "y": 0.010045314191763244,
+          "n": 49874
+        },
+        {
+          "x": 0.07333459848138271,
+          "y": 0.059182526298883806,
+          "n": 24906
+        },
+        {
+          "x": 0.12148177649798042,
+          "y": 0.1405621301775148,
+          "n": 33800
+        },
+        {
+          "x": 0.17431201705069124,
+          "y": 0.1910863958736299,
+          "n": 12408
+        },
+        {
+          "x": 0.2306825317192045,
+          "y": 0.25622694313700545,
+          "n": 39305
+        },
+        {
+          "x": 0.2797647925395752,
+          "y": 0.3294067000626174,
+          "n": 25552
+        },
+        {
+          "x": 0.321832507108654,
+          "y": 0.3588513419552218,
+          "n": 14382
+        },
+        {
+          "x": 0.37319932668290107,
+          "y": 0.3844444444444444,
+          "n": 29700
+        },
+        {
+          "x": 0.42579274690790125,
+          "y": 0.4375101907712376,
+          "n": 24532
+        },
+        {
+          "x": 0.46855120515244086,
+          "y": 0.47947226556958433,
+          "n": 35245
+        },
+        {
+          "x": 0.5268632807854882,
+          "y": 0.5286844567960752,
+          "n": 35263
+        },
+        {
+          "x": 0.5725513228353373,
+          "y": 0.5869432082635855,
+          "n": 24493
+        },
+        {
+          "x": 0.6270757504953194,
+          "y": 0.6219610234801652,
+          "n": 36073
+        },
+        {
+          "x": 0.677120391022092,
+          "y": 0.6548522206416943,
+          "n": 25308
+        },
+        {
+          "x": 0.723517228678402,
+          "y": 0.695145359997208,
+          "n": 28653
+        },
+        {
+          "x": 0.7618463385749048,
+          "y": 0.744384884596642,
+          "n": 22573
+        },
+        {
+          "x": 0.8231220880015571,
+          "y": 0.7972140557188856,
+          "n": 42858
+        },
+        {
+          "x": 0.8631558923043805,
+          "y": 0.8780657852145116,
+          "n": 40161
+        },
+        {
+          "x": 0.9191762714996845,
+          "y": 0.9374559051784959,
+          "n": 28348
+        },
+        {
+          "x": 0.9900628516198544,
+          "y": 0.9850606909430439,
+          "n": 86751
+        }
+      ]
+    }
+  ],
+  "best_models": {
+    "logloss": "CatBoost + Platt",
+    "brier": "CatBoost + Platt",
+    "ece": "CatBoost + Platt",
+    "auc": "CatBoost + Platt"
+  }
+};
+                
+                // Initialize chart when page loads
+                window.addEventListener('load', function() {
+                    const canvas = document.getElementById('modelComparisonCalibrationChart');
+                    if (!canvas) return;
+                    
+                    const ctx = canvas.getContext('2d');
+                    const { models } = comparisonData;
+                    
+                    // Build datasets for all models - dots only, no lines
+                    const datasets = models.map(model => ({
+                        label: model.model_label,
+                        data: model.calibration_points.map(p => ({
+                            x: p.x,
+                            y: p.y,
+                            n: p.n
+                        })),
+                        backgroundColor: model.model_color + '40', // More transparent
+                        borderColor: model.model_color,
+                        pointRadius: model.calibration_points.map(p => {
+                            const n = p.n || 0;
+                            return Math.max(4, Math.min(12, 4 + (n / 10000)));
+                        }),
+                        pointHoverRadius: 10,
+                        fill: false,
+                        showLine: false, // No lines, just dots
+                        tension: 0
+                    }));
+                    
+                    // Add perfect calibration line
+                    datasets.push({
+                        label: 'Perfect Calibration (y = x)',
+                        data: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+                        type: 'line',
+                        borderColor: 'rgba(255, 255, 255, 0.5)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0
+                    });
+                    
+                    new Chart(ctx, {
+                        type: 'scatter',
+                        data: { datasets },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    type: 'linear',
+                                    position: 'bottom',
+                                    title: {
+                                        display: true,
+                                        text: 'Predicted Probability',
+                                        color: '#888899'
+                                    },
+                                    min: 0,
+                                    max: 1,
+                                    ticks: { color: '#888899' },
+                                    grid: { color: '#2a2a40' }
+                                },
+                                y: {
+                                    type: 'linear',
+                                    position: 'left',
+                                    title: {
+                                        display: true,
+                                        text: 'Observed Win Rate',
+                                        color: '#888899'
+                                    },
+                                    min: 0,
+                                    max: 1,
+                                    ticks: { color: '#888899' },
+                                    grid: { color: '#2a2a40' }
+                                }
+                            },
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            if (context.dataset.label === 'Perfect Calibration (y = x)') {
+                                                return context.dataset.label;
+                                            }
+                                            const point = context.raw;
+                                            const gap = point.y - point.x;
+                                            const gapText = gap > 0 ? `+${(gap * 100).toFixed(2)}%` : `${(gap * 100).toFixed(2)}%`;
+                                            return [
+                                                `Model: ${context.dataset.label}`,
+                                                `Predicted: ${(point.x * 100).toFixed(1)}%`,
+                                                `Actual: ${(point.y * 100).toFixed(1)}%`,
+                                                `Gap: ${gapText}`,
+                                                `Samples: ${point.n || 0}`
+                                            ];
+                                        }
+                                    }
+                                },
+                                legend: {
+                                    display: true,
+                                    position: 'top',
+                                    labels: {
+                                        color: '#888899',
+                                        filter: (item) => item.text !== 'Perfect Calibration (y = x)'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+            </script>
+        
+</head>
+<body>
+    <div class="stats-page-view" style="display: block;">
+        <div class="page-header">
+            <div>
+                <h2>Model Comparison</h2>
+                <p class="page-header-subtitle">2×2 Matrix: Logistic Regression vs CatBoost × Platt vs Isotonic Calibration</p>
+            </div>
+        </div>
+        <div class="model-comparison-container" id="modelComparisonContainer">
+            
+        <div class="model-comparison-section">
+            <h3>Overall Metrics Comparison</h3>
+            <table class="metrics-table">
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th style="text-align: right;">Log Loss</th>
+                        <th style="text-align: right;">Brier Score</th>
+                        <th style="text-align: right;">ECE</th>
+                        <th style="text-align: right;">AUC</th>
+                        <th style="text-align: right;">N</th>
+                    </tr>
+                </thead>
+                <tbody>
+    
+            <tr class="">
+                <td><strong>Logistic Regression + Platt</strong></td>
+                <td style="text-align: right; ">0.462338</td>
+                <td style="text-align: right; ">0.154399</td>
+                <td style="text-align: right; ">0.022156</td>
+                <td style="text-align: right; ">0.856225</td>
+                <td style="text-align: right;">660,185</td>
+            </tr>
+        
+            <tr class="">
+                <td><strong>Logistic Regression + Isotonic</strong></td>
+                <td style="text-align: right; ">0.462515</td>
+                <td style="text-align: right; ">0.153999</td>
+                <td style="text-align: right; ">0.012659</td>
+                <td style="text-align: right; ">0.856186</td>
+                <td style="text-align: right;">660,185</td>
+            </tr>
+        
+            <tr class="best-model-row">
+                <td><strong>CatBoost + Platt</strong></td>
+                <td style="text-align: right; font-weight: bold; color: var(--accent);">0.450569</td>
+                <td style="text-align: right; font-weight: bold; color: var(--accent);">0.150896</td>
+                <td style="text-align: right; font-weight: bold; color: var(--accent);">0.011159</td>
+                <td style="text-align: right; font-weight: bold; color: var(--accent);">0.861544</td>
+                <td style="text-align: right;">660,185</td>
+            </tr>
+        
+            <tr class="">
+                <td><strong>CatBoost + Isotonic</strong></td>
+                <td style="text-align: right; ">0.451942</td>
+                <td style="text-align: right; ">0.151122</td>
+                <td style="text-align: right; ">0.015381</td>
+                <td style="text-align: right; ">0.861467</td>
+                <td style="text-align: right;">660,185</td>
+            </tr>
+        
+                </tbody>
+            </table>
+        </div>
+    
+        <div class="best-models-summary">
+            <h4>Best Models by Metric</h4>
+            <ul>
+                <li><strong>Log Loss</strong> (lower is better): CatBoost + Platt</li>
+                <li><strong>Brier Score</strong> (lower is better): CatBoost + Platt</li>
+                <li><strong>ECE</strong> (lower is better): CatBoost + Platt</li>
+                <li><strong>AUC</strong> (higher is better): CatBoost + Platt</li>
+            </ul>
+        </div>
+    
+        <div class="model-comparison-section">
+            <h3>Calibration Comparison</h3>
+            <p class="section-description">All 4 models plotted together. Points closer to the diagonal line (y=x) indicate better calibration.</p>
+            <div class="chart-wrapper" style="height: 600px;">
+                <canvas id="modelComparisonCalibrationChart" width="2604" height="1200" style="display: block; box-sizing: border-box; height: 600px; width: 1302px;"></canvas>
+            </div>
+        </div>
+    
+        </div>
+    </div>
+</body>
+</html>

@@ -35,7 +35,7 @@ from fastapi.responses import FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .logging_config import setup_logging, get_logger, DEBUG_MODE
-from .endpoints import games, probabilities, metadata, stats, aggregate_stats, live_games, live_data, simulation, update, model_evaluation, grid_search, logs, export
+from .endpoints import games, probabilities, metadata, stats, aggregate_stats, live_games, live_data, simulation, update, model_evaluation, grid_search, logs, export, model_comparison
 from .websocket_manager import get_websocket_manager
 
 # Global flag for graceful shutdown
@@ -144,6 +144,7 @@ app.include_router(update.router, tags=["update"])  # No prefix - has both /api/
 app.include_router(grid_search.router, tags=["grid_search"])  # No prefix - has both /api/grid-search/* and /ws/grid-search/{request_id} routes
 app.include_router(logs.router, tags=["logs"])  # No prefix - has both /api/logs and /ws/logs routes
 app.include_router(export.router, prefix="/api", tags=["export"])  # Export endpoint at /api/export/html
+app.include_router(model_comparison.router, prefix="/api", tags=["model_comparison"])  # Model comparison endpoint at /api/stats/model-comparison
 
 
 # =============================================================================

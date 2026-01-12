@@ -1,0 +1,24 @@
+<!-- Model Comparison View -->
+<section class="stats-page-view" id="modelComparisonPageView" style="display: block;">
+    <div class="page-header">
+        <div>
+            <h2>Model Comparison</h2>
+            <p class="page-header-subtitle">2×2 Matrix: Logistic Regression vs CatBoost × Platt vs Isotonic Calibration</p>
+        </div>
+        <div class="export-buttons">
+            <button class="export-btn" id="exportComparisonHtmlBtn" onclick="exportComparisonToHTML()" title="Export as standalone HTML file">
+                📄 Export HTML
+            </button>
+            <button class="export-btn" id="exportComparisonImageBtn" onclick="exportComparisonToImage()" title="Export as image (PNG)">
+                🖼️ Export Image
+            </button>
+        </div>
+    </div>
+    <div class="model-comparison-container" id="modelComparisonContainer">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            Loading model comparison...
+        </div>
+    </div>
+</section>
+

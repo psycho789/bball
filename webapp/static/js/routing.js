@@ -30,6 +30,8 @@ function updateActiveNav() {
             activeRoute = 'grid-search';
         } else if (route.view === 'logging') {
             activeRoute = 'logging';
+        } else if (route.view === 'model-comparison') {
+            activeRoute = 'model-comparison';
         }
         
         if (linkRoute === activeRoute) {
@@ -67,6 +69,9 @@ function getRoute() {
     }
     if (hash === '/logging' || hash.startsWith('/logging')) {
         return { view: 'logging', gameId: null };
+    }
+    if (hash === '/model-comparison' || hash.startsWith('/model-comparison')) {
+        return { view: 'model-comparison', gameId: null };
     }
     return { view: 'list', gameId: null };
 }
@@ -114,6 +119,11 @@ function navigateToGridSearchPage() {
 function navigateToLoggingPage() {
     window.location.hash = '/logging';
     showLoggingPageView();
+}
+
+function navigateToModelComparisonPage() {
+    window.location.hash = '/model-comparison';
+    showModelComparisonPageView();
 }
 
 function navigateToLiveGamesList() {
@@ -282,6 +292,30 @@ async function showLiveGamesListView() {
             }, 10);
         });
     });
+}
+
+async function showModelComparisonPageView() {
+    updateActiveNav();
+    const viewsContainer = document.getElementById('app-views');
+    if (!viewsContainer) {
+        console.error('app-views container not found');
+        return;
+    }
+    
+    await renderTemplate('model-comparison', viewsContainer);
+    
+    // Show the view
+    const modelComparisonView = document.getElementById('modelComparisonPageView');
+    if (modelComparisonView) {
+        modelComparisonView.style.display = 'block';
+    }
+    
+    // Load model comparison data
+    if (typeof loadModelComparison === 'function') {
+        await loadModelComparison();
+    } else {
+        console.error('loadModelComparison function not found');
+    }
 }
 
 async function showGridSearchPageView() {
@@ -517,6 +551,16 @@ window.addEventListener('hashchange', async () => {
             cleanupLoggingPage();
         }
         await showGridSearchPageView();
+    } else if (route.view === 'model-comparison') {
+        // Cleanup live game when navigating to model comparison
+        if (typeof cleanupLiveGame === 'function') {
+            cleanupLiveGame();
+        }
+        // Cleanup logging when navigating to model comparison
+        if (typeof cleanupLoggingPage === 'function') {
+            cleanupLoggingPage();
+        }
+        await showModelComparisonPageView();
     } else {
         // Cleanup live game when navigating to other views
         if (typeof cleanupLiveGame === 'function') {
