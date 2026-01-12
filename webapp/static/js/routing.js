@@ -32,6 +32,8 @@ function updateActiveNav() {
             activeRoute = 'logging';
         } else if (route.view === 'model-comparison') {
             activeRoute = 'model-comparison';
+        } else if (route.view === 'grid-search-comparison') {
+            activeRoute = 'grid-search-comparison';
         }
         
         if (linkRoute === activeRoute) {
@@ -63,6 +65,10 @@ function getRoute() {
     }
     if (hash === '/simulation' || hash.startsWith('/simulation')) {
         return { view: 'simulation', gameId: null };
+    }
+    // Check grid-search-comparison BEFORE grid-search (since it starts with /grid-search)
+    if (hash === '/grid-search-comparison' || hash.startsWith('/grid-search-comparison')) {
+        return { view: 'grid-search-comparison', gameId: null };
     }
     if (hash === '/grid-search' || hash.startsWith('/grid-search')) {
         return { view: 'grid-search', gameId: null };
@@ -124,6 +130,11 @@ function navigateToLoggingPage() {
 function navigateToModelComparisonPage() {
     window.location.hash = '/model-comparison';
     showModelComparisonPageView();
+}
+
+function navigateToGridSearchComparisonPage() {
+    window.location.hash = '/grid-search-comparison';
+    showGridSearchComparisonPageView();
 }
 
 function navigateToLiveGamesList() {
@@ -362,6 +373,32 @@ async function showGridSearchPageView() {
     });
 }
 
+async function showGridSearchComparisonPageView() {
+    const viewsContainer = document.getElementById('app-views');
+    if (!viewsContainer) {
+        console.error('app-views container not found');
+        return;
+    }
+    
+    await renderTemplate('grid-search-comparison', viewsContainer);
+    
+    // Show the view
+    const comparisonView = document.getElementById('gridSearchComparisonView');
+    if (comparisonView) {
+        comparisonView.style.display = 'block';
+    }
+    
+    // Update navigation highlighting AFTER template is rendered
+    updateActiveNav();
+    
+    // Load comparison data
+    if (typeof loadGridSearchComparison === 'function') {
+        await loadGridSearchComparison();
+    } else {
+        console.error('loadGridSearchComparison function not found');
+    }
+}
+
 async function showSimulationPageView() {
     updateActiveNav();
     // Stop any active refresh polling from stats page
@@ -561,6 +598,16 @@ window.addEventListener('hashchange', async () => {
             cleanupLoggingPage();
         }
         await showModelComparisonPageView();
+    } else if (route.view === 'grid-search-comparison') {
+        // Cleanup live game when navigating to grid search comparison
+        if (typeof cleanupLiveGame === 'function') {
+            cleanupLiveGame();
+        }
+        // Cleanup logging when navigating to grid search comparison
+        if (typeof cleanupLoggingPage === 'function') {
+            cleanupLoggingPage();
+        }
+        await showGridSearchComparisonPageView();
     } else {
         // Cleanup live game when navigating to other views
         if (typeof cleanupLiveGame === 'function') {

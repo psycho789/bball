@@ -38,7 +38,7 @@
 - **Action 3**: [Priority: Medium] - Expand cache clearing to include all affected caches (`get_aggregate_stats`, simulation caches).
 
 ### Success Metrics
-- **Metric 1**: Refetch button completes all steps without manual intervention - [Baseline: 6/8 steps] → [Target: 8/8 steps] ([100% completion])
+- **Metric 1**: Refetch button completes all steps without manual intervention - [Baseline: 7/10 steps] → [Target: 10/10 steps] ([100% completion])
 - **Metric 2**: Webapp endpoints return fresh data immediately after refetch - [Baseline: Requires manual steps] → [Target: Automatic] ([100% automation])
 - **Metric 3**: Materialized view refresh time - [Baseline: Manual, ~5-10 minutes] → [Target: Automated, ~5-10 minutes] ([No time change, but automated])
 
@@ -51,17 +51,17 @@ The refetch data button (`/api/update/trigger`) triggers `run_update_task()` whi
 2. ✅ Loads scoreboards into `espn.scoreboard_games`
 3. ✅ Fetches ESPN probabilities for new games
 4. ✅ Loads probabilities into `espn.probabilities_raw_items`
-5. ✅ Fetches Kalshi markets
-6. ✅ Loads Kalshi markets into `kalshi.markets`
-7. ✅ Fetches Kalshi candlesticks
-8. ✅ Loads Kalshi candlesticks into `kalshi.candlesticks`
-9. ✅ Clears `list_games.cache`
+5. ✅ Fetches and loads Kalshi markets (combined step → `kalshi.markets`)
+6. ✅ Fetches and loads Kalshi candlesticks (combined step → `kalshi.candlesticks`)
+7. ✅ Clears `list_games.cache`
+
+**Note**: Steps 5-6 combine fetch+load operations in single functions (`fetch_and_load_kalshi_markets()`, `fetch_and_load_kalshi_candlesticks()`).
 
 However, the following critical steps are **missing**:
 
 - ❌ **Process `espn.prob_event_state`**: This table is populated by `scripts/process/materialize_espn_prob_event_state.py` but is never called by the refetch process.
 - ❌ **Refresh `derived.snapshot_features_v1`**: This materialized view needs `REFRESH MATERIALIZED VIEW CONCURRENTLY` after new data is loaded.
-- ❌ **Clear additional caches**: `get_aggregate_stats.cache` and simulation caches are not cleared.
+- ❌ **Clear additional caches**: `get_aggregate_stats.cache` and simulation caches are not cleared. (Note: A separate `/api/update/clear-cache` endpoint exists that clears both `list_games.cache` and `get_aggregate_stats.cache`, but it's not called automatically by the refetch process.)
 
 ### Pain Points
 - **Pain Point 1**: After pressing refetch, users must manually run `materialize_espn_prob_event_state.py` to populate game state data, breaking the "one-click" promise.
@@ -89,14 +89,14 @@ However, the following critical steps are **missing**:
 **Sprint Scope Recommendation**: Single Sprint
 - **Rationale**: All changes are in one file (`update.py`), scripts already exist and are tested, changes are additive (no breaking changes).
 - **Recommended Approach**: Add 3 new steps to `run_update_task()`:
-  - Step 7: Process `espn.prob_event_state` (after probabilities loaded)
-  - Step 8: Refresh materialized view `derived.snapshot_features_v1` (after all data loaded)
-  - Step 9: Clear all affected caches (expand existing cache clearing)
+  - Step 8: Process `espn.prob_event_state` (after probabilities loaded)
+  - Step 9: Refresh materialized view `derived.snapshot_features_v1` (after all data loaded)
+  - Step 10: Clear all affected caches (expand existing cache clearing)
 
 **Dependency Analysis**:
-- Step 7 depends on Step 4 (probabilities must be loaded first)
-- Step 8 depends on Steps 4 and 6 (probabilities and candlesticks must be loaded)
-- Step 9 can run after any data changes (no dependencies)
+- Step 8 depends on Step 4 (probabilities must be loaded first)
+- Step 9 depends on Steps 4 and 6 (probabilities and candlesticks must be loaded)
+- Step 10 can run after any data changes (no dependencies)
 
 ## Current State Analysis
 
@@ -114,11 +114,9 @@ run_update_task() (background task)
   ├─ Step 2: Load scoreboards → espn.scoreboard_games
   ├─ Step 3: Fetch ESPN probabilities (new games)
   ├─ Step 4: Load probabilities → espn.probabilities_raw_items
-  ├─ Step 5: Fetch Kalshi markets
-  ├─ Step 6: Load Kalshi markets → kalshi.markets
-  ├─ Step 7: Fetch Kalshi candlesticks
-  ├─ Step 8: Load Kalshi candlesticks → kalshi.candlesticks
-  └─ Step 9: Clear list_games.cache
+  ├─ Step 5: Fetch and load Kalshi markets → kalshi.markets (combined)
+  ├─ Step 6: Fetch and load Kalshi candlesticks → kalshi.candlesticks (combined)
+  └─ Step 7: Clear list_games.cache
 ```
 
 **Missing Steps** (not in current flow):
@@ -536,15 +534,15 @@ def refresh_materialized_views() -> tuple[bool, str]:
 **Specific Action**: Expand cache clearing to include `get_aggregate_stats.cache` and simulation caches.
 
 **Files to Modify**:
-- `webapp/api/endpoints/update.py` - Expand cache clearing section (lines 1337-1353)
+- `webapp/api/endpoints/update.py` - Expand cache clearing section (lines 1455-1471)
 
 **Estimated Effort**: 1 hour
-- 30 minutes: Add clearing for `get_aggregate_stats.cache`
-- 30 minutes: Add clearing for simulation caches (if applicable)
+- 30 minutes: Add clearing for `get_aggregate_stats.cache` (similar to existing `clear_games_cache()` endpoint logic)
+- 30 minutes: Test and verify cache clearing works correctly
 
 **Risk Level**: Low
 - Cache clearing is safe (just deletes cache files)
-- Existing cache clearing code can be extended
+- Existing cache clearing code can be extended (can reuse logic from `/api/update/clear-cache` endpoint)
 
 **Success Metrics**:
 - All affected caches cleared after refetch
@@ -552,17 +550,21 @@ def refresh_materialized_views() -> tuple[bool, str]:
 
 **Implementation Details**:
 ```python
-# Clear games cache
+# Clear games cache (existing)
 cache_instance = SimpleCache(ttl_seconds=86400, cache_file="list_games.cache")
 cache_instance.clear()
 
-# Clear aggregate stats cache
+# Clear aggregate stats cache (new)
 from . import aggregate_stats
 if hasattr(aggregate_stats.get_aggregate_stats, '_cache_instance'):
     aggregate_stats.get_aggregate_stats._cache_instance.clear()
+else:
+    # Fallback: create new instance and clear it
+    cache_instance = SimpleCache(ttl_seconds=86400, cache_file="get_aggregate_stats.cache")
+    cache_instance.clear()
 
-# Clear simulation cache (if exists)
-# ... (check if simulation endpoint has cache) ...
+# Note: Simulation cache is in-memory only and doesn't need clearing
+# (simulations query DB directly, though stale materialized views would affect them)
 ```
 
 ### Short-term Improvements (Priority: Medium)
@@ -783,7 +785,7 @@ if hasattr(aggregate_stats.get_aggregate_stats, '_cache_instance'):
 
 ### Performance Metrics
 - **Response Time**: Refetch completes in 10-20 minutes (up from 5-15 minutes) ([+33% time, but complete])
-- **Throughput**: All 8 steps complete successfully ([Baseline: 6/8] → [Target: 8/8] ([+33% completion])
+- **Throughput**: All 10 steps complete successfully ([Baseline: 7/10] → [Target: 10/10] ([+43% completion])
 - **Error Rate**: < 5% failure rate for new steps ([Target: < 5%])
 
 ### Quality Metrics

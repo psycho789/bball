@@ -58,25 +58,32 @@ except ImportError:
     # Logger not yet defined, will log warning later if needed
 
 # Set up Rich console and logging
-# Rich Progress bar will stay at bottom, logs appear above it automatically
-console = Console(stderr=True)
+# Force terminal mode and redirect stdout/stderr to keep progress bar sticky
+console = Console(stderr=True, force_terminal=True)
 
 # Configure logging to use RichHandler for clean rendering under progress bar
-# RichHandler automatically detects active Progress context and renders logs above progress bar
+# Use force=True to override any existing logging configuration
+# This ensures ALL loggers go through RichHandler, preventing "raw" output that breaks the progress bar
 try:
     from webapp.api.logging_config import get_logger
+    # First, force basicConfig to override any existing handlers
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[RichHandler(
+            console=console, 
+            rich_tracebacks=True, 
+            markup=False,
+            show_path=False,
+            show_time=False
+        )],
+        force=True  # Override any existing logging config
+    )
+    # Now get logger - it will use the root handler we just set
     logger = get_logger(__name__)
-    # Force RichHandler on root logger so all logs go through Rich
-    root = logging.getLogger()
-    # RichHandler automatically works with Rich Progress - no special config needed
-    root.handlers = [RichHandler(
-        console=console, 
-        rich_tracebacks=True, 
-        markup=False,
-        show_path=False,
-        show_time=False
-    )]
-    root.setLevel(logging.INFO)
+    # Ensure this logger propagates to root and uses root's RichHandler
+    logger.propagate = True
+    logger.handlers.clear()  # Remove any handlers that get_logger might have added
 except ImportError:
     # Fallback if webapp not available
     logging.basicConfig(
@@ -89,7 +96,8 @@ except ImportError:
             markup=False,
             show_path=False,
             show_time=False
-        )]
+        )],
+        force=True  # Override any existing logging config
     )
     logger = logging.getLogger(__name__)
 
@@ -905,8 +913,9 @@ def main():
     total_work_units = len(combinations) * total_games
     
     # Create Rich Progress object for sticky progress bar
-    # The progress bar will stay at the bottom of the terminal
-    # Logs will appear above it automatically when RichHandler detects the Progress context
+    # redirect_stdout=True and redirect_stderr=True capture any prints/warnings
+    # that don't go through RichHandler and re-render them above the progress bar
+    # This is critical for keeping the progress bar "sticky" at the bottom
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]Grid search[/bold blue]"),
@@ -923,6 +932,8 @@ def main():
         console=console,
         transient=False,  # Keep it visible at the end
         refresh_per_second=4,  # Update 4 times per second (smooth but not too frequent)
+        redirect_stdout=True,  # Capture stdout (prints, etc.) and render above progress bar
+        redirect_stderr=True,  # Capture stderr (warnings, etc.) and render above progress bar
     )
     
     task_id = progress.add_task(

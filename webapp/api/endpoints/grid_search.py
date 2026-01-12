@@ -716,7 +716,9 @@ def _run_grid_search_background(
                 try:
                     from pathlib import Path
                     import json as json_lib
-                    output_dir = Path("data/grid_search") / cache_key
+                    # Get repo root for consistent path resolution
+                    repo_root = Path(__file__).parent.parent.parent.parent
+                    output_dir = repo_root / "data" / "grid_search" / cache_key
                     output_dir.mkdir(parents=True, exist_ok=True)
                     
                     # Write final_selection.json
@@ -825,6 +827,16 @@ def _generate_grid_search_cache_key(
 def _transform_visualization_data(train_results: list[dict], validation_results: list[dict], final_selection: dict) -> dict[str, Any]:
     """Transform results data for client-side Chart.js rendering."""
     try:
+        # Validate inputs
+        if not final_selection or 'chosen_params' not in final_selection:
+            logger.error(f"[VIZ_DATA] final_selection missing or invalid: {final_selection}")
+            raise ValueError("final_selection must contain 'chosen_params'")
+        
+        chosen_params = final_selection['chosen_params']
+        if 'entry_threshold' not in chosen_params or 'exit_threshold' not in chosen_params:
+            logger.error(f"[VIZ_DATA] chosen_params missing required fields: {chosen_params}")
+            raise ValueError("chosen_params must contain 'entry_threshold' and 'exit_threshold'")
+        
         # Sanity check: ensure train_results and validation_results are different objects
         if train_results is validation_results:
             logger.error("[VIZ_DATA] CRITICAL BUG: train_results and validation_results are the same object!")
@@ -833,6 +845,14 @@ def _transform_visualization_data(train_results: list[dict], validation_results:
         # Create copies to avoid any potential mutation issues
         train_results_copy = [dict(r) for r in train_results]  # Deep copy each dict
         validation_results_copy = [dict(r) for r in validation_results]  # Deep copy each dict
+        
+        # Check if results are empty
+        if not train_results_copy:
+            logger.warning(f"[VIZ_DATA] train_results is empty, returning empty visualization data")
+            return {}
+        if not validation_results_copy:
+            logger.warning(f"[VIZ_DATA] validation_results is empty, returning empty visualization data")
+            return {}
         
         df_train = pd.DataFrame(train_results_copy)
         df_valid = pd.DataFrame(validation_results_copy)
@@ -857,8 +877,9 @@ def _transform_visualization_data(train_results: list[dict], validation_results:
                 if train_sample == valid_sample:
                     logger.warning(f"[VIZ_DATA] WARNING: First 3 rows of train and valid are identical! This may indicate a bug.")
         
-        chosen_entry = final_selection['chosen_params']['entry_threshold']
-        chosen_exit = final_selection['chosen_params']['exit_threshold']
+        # Extract chosen params (already validated above)
+        chosen_entry = chosen_params['entry_threshold']
+        chosen_exit = chosen_params['exit_threshold']
         
         # Helper function to create heatmap data
         def create_heatmap_data(df, value_col):
@@ -871,10 +892,18 @@ def _transform_visualization_data(train_results: list[dict], validation_results:
                     'chosen_entry': chosen_entry,
                     'chosen_exit': chosen_exit
                 }
+            # Create pivot (same as analysis script)
             pivot = df.pivot(index='exit_threshold', columns='entry_threshold', values=value_col)
-            entry_thresholds = sorted(list(pivot.columns))
-            exit_thresholds = sorted(list(pivot.index))
-            matrix = pivot.reindex(columns=entry_thresholds, index=exit_thresholds).values.tolist()
+            
+            # Sort index and columns in-place (doesn't create NaN values like reindex does)
+            # This matches the analysis script behavior while ensuring consistent ordering
+            pivot = pivot.sort_index(axis=0).sort_index(axis=1)
+            
+            entry_thresholds = list(pivot.columns)
+            exit_thresholds = list(pivot.index)
+            # Use pivot.values directly (no reindex) - matches analysis script behavior
+            # Convert NaN to None for JSON serialization (pandas uses NaN, JSON uses null)
+            matrix = [[None if pd.isna(val) else float(val) for val in row] for row in pivot.values]
             
             # Log matrix summary for debugging
             matrix_flat = [val for row in matrix for val in row if val is not None]
@@ -1049,26 +1078,17 @@ def run_grid_search(
         model_name=model_name
     )
     
-    # Check cache first (in-memory cache)
-    with _grid_search_cache_lock:
-        cached_result = _grid_search_cache.get(cache_key)
-        if cached_result is not None:
-            logger.info(f"Grid search cache HIT for key: {cache_key[:32]}...")
-            # Create a new request_id for this cached result
-            request_id = str(uuid.uuid4())
-            # Store cached result in progress tracking (so it can be retrieved via progress endpoint)
-            with _grid_search_lock:
-                _grid_search_progress[request_id] = cached_result.copy()
-            return {
-                "request_id": request_id,
-                "status": "complete",
-                "cached": True
-            }
-    
-    # Check for existing output files in standardized location
+    # Priority 1: Check for existing output files in standardized location (source of truth)
+    # Files have ALL data, so we can compute visualization_data correctly
     from pathlib import Path
-    output_dir = Path("data/grid_search") / cache_key
+    # Get repo root (webapp/api/endpoints/grid_search.py -> repo root)
+    repo_root = Path(__file__).parent.parent.parent.parent
+    output_dir = repo_root / "data" / "grid_search" / cache_key
     final_selection_path = output_dir / "final_selection.json"
+    
+    logger.info(f"[FILE_CHECK] Checking for files at: {output_dir}")
+    logger.info(f"[FILE_CHECK] Cache key: {cache_key}")
+    logger.info(f"[FILE_CHECK] final_selection_path exists: {final_selection_path.exists()}")
     
     if final_selection_path.exists():
         logger.info(f"Grid search files found at {output_dir}, loading from disk...")
@@ -1090,9 +1110,8 @@ def run_grid_search(
                         split_data = json_lib.load(f)
                         results = split_data.get('results', [])
                         if split_name == 'train':
-                            # Take top N for training results
-                            results_sorted = sorted(results, key=lambda x: x.get('net_profit_dollars', 0), reverse=True)
-                            training_results = results_sorted[:top_n]
+                            # Load ALL training results for visualization (top N is only for selection logic)
+                            training_results = results
                         elif split_name == 'valid':
                             validation_results = results
                         elif split_name == 'test':
@@ -1111,9 +1130,22 @@ def run_grid_search(
             
             visualization_data = {}
             try:
-                visualization_data = _transform_visualization_data(training_results, validation_results, final_selection)
+                # Validate inputs before transformation
+                if not training_results:
+                    logger.warning(f"[VIZ_DATA] training_results is empty, cannot generate visualization data")
+                elif not validation_results:
+                    logger.warning(f"[VIZ_DATA] validation_results is empty, cannot generate visualization data")
+                elif not final_selection or not final_selection.get('chosen_params'):
+                    logger.warning(f"[VIZ_DATA] final_selection missing or invalid, cannot generate visualization data")
+                else:
+                    logger.info(f"[VIZ_DATA] Transforming visualization data: {len(training_results)} train results, {len(validation_results)} valid results")
+                    visualization_data = _transform_visualization_data(training_results, validation_results, final_selection)
+                    if not visualization_data:
+                        logger.warning(f"[VIZ_DATA] _transform_visualization_data returned empty dict")
+                    else:
+                        logger.info(f"[VIZ_DATA] Successfully generated visualization data with keys: {list(visualization_data.keys())}")
             except Exception as e:
-                logger.warning(f"Error transforming visualization data from file: {e}")
+                logger.error(f"Error transforming vizsualization data from file: {e}", exc_info=True)
                 visualization_data = {}
             
             # Load metadata if available
@@ -1124,6 +1156,10 @@ def run_grid_search(
                     train_data = json_lib.load(f)
                     metadata = train_data.get('metadata', {})
             
+            # Filter training results to top N for table display (visualization already uses all results)
+            training_results_sorted = sorted(training_results, key=lambda x: x.get('net_profit_dollars', 0), reverse=True)
+            top_n_training_results = [_convert_numpy_types(r) for r in training_results_sorted[:top_n]]
+            
             # Store in progress tracking
             request_id = str(uuid.uuid4())
             with _grid_search_lock:
@@ -1132,11 +1168,11 @@ def run_grid_search(
                     "current": metadata.get('num_combinations', 0),
                     "total": metadata.get('num_combinations', 0),
                     "final_selection": _convert_numpy_types(final_selection),
-                    "training_results": [_convert_numpy_types(r) for r in training_results],
+                    "training_results": top_n_training_results,  # Top N for table display
                     "validation_results": [_convert_numpy_types(r) for r in validation_results],
                     "test_results": [_convert_numpy_types(r) for r in test_results],
                     "pattern_detection": _convert_numpy_types(pattern_detection),
-                    "visualization_data": _convert_numpy_types(visualization_data),
+                    "visualization_data": _convert_numpy_types(visualization_data),  # Uses ALL training_results
                     "metadata": _convert_numpy_types(metadata)
                 }
             
@@ -1148,13 +1184,177 @@ def run_grid_search(
             return {
                 "request_id": request_id,
                 "status": "complete",
-                "cached": True,
+                "cached": False,
                 "source": "files"
             }
         except Exception as e:
-            logger.warning(f"Error loading grid search from files: {e}, will run grid search instead")
+            logger.warning(f"Error loading grid search from files: {e}, will check cache or run grid search")
     
-    logger.info(f"Grid search cache MISS for key: {cache_key[:32]}..., starting background task")
+    # Priority 2: Check cache (only if files don't exist)
+    # But first, double-check if files exist (maybe final_selection.json check failed but files are there)
+    # Also check if visualization_data needs recomputation
+    train_json_path = output_dir / "grid_results_train.json"
+    valid_json_path = output_dir / "grid_results_valid.json"
+    files_exist = train_json_path.exists() and valid_json_path.exists() and final_selection_path.exists()
+    
+    if files_exist:
+        logger.warning(f"Files exist at {output_dir} but were not loaded in Priority 1 check. This should not happen. Attempting to load now...")
+        # This is a fallback - files should have been loaded in Priority 1
+        # But if we get here, try to load them anyway
+        try:
+            import json as json_lib
+            with open(final_selection_path, 'r') as f:
+                final_selection = json_lib.load(f)
+            
+            training_results = []
+            validation_results = []
+            test_results = []
+            
+            for split_name in ['train', 'valid', 'test']:
+                json_path = output_dir / f"grid_results_{split_name}.json"
+                if json_path.exists():
+                    with open(json_path, 'r') as f:
+                        split_data = json_lib.load(f)
+                        results = split_data.get('results', [])
+                        if split_name == 'train':
+                            training_results = results
+                        elif split_name == 'valid':
+                            validation_results = results
+                        elif split_name == 'test':
+                            test_results = results
+            
+            # Compute visualization_data
+            import pandas as pd
+            visualization_data = {}
+            try:
+                if training_results and validation_results and final_selection:
+                    logger.info(f"[VIZ_DATA] Computing visualization_data from files: {len(training_results)} train, {len(validation_results)} valid")
+                    visualization_data = _transform_visualization_data(training_results, validation_results, final_selection)
+                    if visualization_data:
+                        logger.info(f"[VIZ_DATA] Successfully computed visualization_data with keys: {list(visualization_data.keys())}")
+            except Exception as e:
+                logger.error(f"Error computing visualization_data from files: {e}", exc_info=True)
+                visualization_data = {}
+            
+            # Load metadata
+            metadata = {}
+            if train_json_path.exists():
+                with open(train_json_path, 'r') as f:
+                    train_data = json_lib.load(f)
+                    metadata = train_data.get('metadata', {})
+            
+            # Filter training results to top N for table
+            training_results_sorted = sorted(training_results, key=lambda x: x.get('net_profit_dollars', 0), reverse=True)
+            top_n_training_results = [_convert_numpy_types(r) for r in training_results_sorted[:top_n]]
+            
+            # Store in progress tracking
+            request_id = str(uuid.uuid4())
+            with _grid_search_lock:
+                _grid_search_progress[request_id] = {
+                    "status": "complete",
+                    "current": metadata.get('num_combinations', 0),
+                    "total": metadata.get('num_combinations', 0),
+                    "final_selection": _convert_numpy_types(final_selection),
+                    "training_results": top_n_training_results,
+                    "validation_results": [_convert_numpy_types(r) for r in validation_results],
+                    "test_results": [_convert_numpy_types(r) for r in test_results],
+                    "pattern_detection": {},
+                    "visualization_data": _convert_numpy_types(visualization_data),
+                    "metadata": _convert_numpy_types(metadata)
+                }
+            
+            logger.info(f"Grid search loaded from files (fallback): {output_dir}")
+            return {
+                "request_id": request_id,
+                "status": "complete",
+                "cached": False,
+                "source": "files"
+            }
+        except Exception as e:
+            logger.error(f"Error loading files in fallback: {e}", exc_info=True)
+    
+    # Check cache (files don't exist, or files exist but cache was hit first)
+    with _grid_search_cache_lock:
+        cached_result = _grid_search_cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Grid search cache HIT for key: {cache_key[:32]}...")
+            
+            # ALWAYS ensure visualization_data is present - compute if missing
+            visualization_data = cached_result.get("visualization_data", {})
+            needs_recompute = not visualization_data or not visualization_data.get("profit_heatmap_train")
+            
+            if needs_recompute:
+                logger.info(f"[VIZ_DATA] Cached result missing visualization_data, attempting to recompute...")
+                
+                # First, try to load from files (best case - complete data)
+                final_selection = cached_result.get("final_selection", {})
+                training_results = []
+                validation_results = []
+                
+                if train_json_path.exists() and valid_json_path.exists() and final_selection_path.exists():
+                    try:
+                        import json as json_lib
+                        logger.info(f"[VIZ_DATA] Loading from files for recomputation...")
+                        with open(train_json_path, 'r') as f:
+                            train_data = json_lib.load(f)
+                            training_results = train_data.get('results', [])
+                        with open(valid_json_path, 'r') as f:
+                            valid_data = json_lib.load(f)
+                            validation_results = valid_data.get('results', [])
+                        with open(final_selection_path, 'r') as f:
+                            final_selection = json_lib.load(f)
+                        logger.info(f"[VIZ_DATA] Loaded {len(training_results)} train, {len(validation_results)} valid from files")
+                    except Exception as e:
+                        logger.warning(f"[VIZ_DATA] Error loading from files: {e}, will try cached data")
+                
+                # If files didn't work, try to use cached training_results and validation_results
+                if not training_results or not validation_results:
+                    logger.info(f"[VIZ_DATA] Files not available, attempting to use cached results...")
+                    training_results = cached_result.get("training_results", [])
+                    validation_results = cached_result.get("validation_results", [])
+                    # Note: cached results might only be top N, so heatmaps may be incomplete
+                    if training_results and validation_results:
+                        logger.info(f"[VIZ_DATA] Using cached results: {len(training_results)} train, {len(validation_results)} valid (may be top N only)")
+                
+                # Compute visualization_data if we have the required data
+                if training_results and validation_results and final_selection and final_selection.get('chosen_params'):
+                    try:
+                        logger.info(f"[VIZ_DATA] Computing visualization_data: {len(training_results)} train, {len(validation_results)} valid")
+                        visualization_data = _transform_visualization_data(training_results, validation_results, final_selection)
+                        if visualization_data:
+                            logger.info(f"[VIZ_DATA] Successfully computed visualization_data with keys: {list(visualization_data.keys())}")
+                            cached_result["visualization_data"] = _convert_numpy_types(visualization_data)
+                            # Update cache with computed visualization_data
+                            _grid_search_cache.set(cache_key, cached_result)
+                            _grid_search_cache.save()
+                        else:
+                            logger.warning(f"[VIZ_DATA] _transform_visualization_data returned empty dict")
+                    except Exception as e:
+                        logger.error(f"[VIZ_DATA] Error computing visualization_data: {e}", exc_info=True)
+                        # Set empty dict to prevent errors downstream
+                        visualization_data = {}
+                else:
+                    logger.warning(f"[VIZ_DATA] Cannot compute: training_results={len(training_results) if training_results else 0}, validation_results={len(validation_results) if validation_results else 0}, final_selection={'present' if final_selection.get('chosen_params') else 'missing'}")
+                    visualization_data = {}
+            
+            # Ensure visualization_data is in cached_result
+            if not cached_result.get("visualization_data"):
+                cached_result["visualization_data"] = visualization_data
+            
+            # Create a new request_id for this cached result
+            request_id = str(uuid.uuid4())
+            # Store cached result in progress tracking (so it can be retrieved via progress endpoint)
+            with _grid_search_lock:
+                _grid_search_progress[request_id] = cached_result.copy()
+            return {
+                "request_id": request_id,
+                "status": "complete",
+                "cached": True,
+                "source": "cache"
+            }
+    
+    # Priority 3: Files and cache don't exist - start new grid search
+    logger.info(f"Grid search files and cache MISS for key: {cache_key[:32]}..., starting background task")
     
     # Generate unique request_id
     request_id = str(uuid.uuid4())
@@ -1391,4 +1591,122 @@ def get_grid_search_results(request_id: str) -> dict[str, Any]:
         }
         
         return _convert_numpy_types(results)
+
+
+@router.get("/api/grid-search/comparison")
+def get_grid_search_comparison() -> dict[str, Any]:
+    """
+    Get comparison data for all grid search models.
+    
+    Reads model_comparison.json and loads visualization data from each model's result directory.
+    Returns unified format with metrics and visualization data for all models.
+    
+    Design Pattern: Facade Pattern - provides unified interface to multiple data sources
+    Algorithm: O(n × m) where n = models (5), m = data files per model (2-3)
+    Big O: O(n × m) - linear in number of models and files
+    """
+    from pathlib import Path
+    
+    logger = get_logger(__name__)
+    
+    # Get repository root (assuming we're in webapp/api/endpoints/)
+    repo_root = Path(__file__).parent.parent.parent.parent
+    grid_search_dir = repo_root / "data" / "grid_search"
+    comparison_json_path = grid_search_dir / "model_comparison.json"
+    
+    # Check if comparison file exists
+    if not comparison_json_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Comparison data not found. Please run the comparison script first: python3 scripts/trade/compare_grid_search_models.py"
+        )
+    
+    try:
+        # Load comparison JSON
+        with open(comparison_json_path, 'r') as f:
+            comparison_data = json_lib.load(f)
+        
+        models = comparison_data.get('models', [])
+        if not models:
+            raise HTTPException(
+                status_code=404,
+                detail="No models found in comparison data"
+            )
+        
+        # Load visualization data for each model
+        visualization_data_by_model = {}
+        
+        for model in models:
+            model_name = model.get('model_name', 'Unknown')
+            result_dir_name = model.get('result_dir', '')
+            
+            if not result_dir_name:
+                logger.warning(f"Model {model_name} has no result_dir, skipping visualization data")
+                continue
+            
+            result_dir = grid_search_dir / result_dir_name
+            
+            # Load train and valid results
+            train_json_path = result_dir / "grid_results_train.json"
+            valid_json_path = result_dir / "grid_results_valid.json"
+            
+            train_results = []
+            valid_results = []
+            
+            if train_json_path.exists():
+                with open(train_json_path, 'r') as f:
+                    train_data = json_lib.load(f)
+                    train_results = train_data.get('results', [])
+            
+            if valid_json_path.exists():
+                with open(valid_json_path, 'r') as f:
+                    valid_data = json_lib.load(f)
+                    valid_results = valid_data.get('results', [])
+            
+            # Construct final_selection from model data (comparison JSON structure)
+            # The comparison JSON has chosen_params, test_metrics, valid_metrics, train_metrics at model level
+            final_selection = {
+                'chosen_params': model.get('chosen_params', {}),
+                'test_metrics': model.get('test_metrics', {}),
+                'valid_metrics': model.get('valid_metrics', {}),
+                'train_metrics': model.get('train_metrics', {})
+            }
+            
+            # Transform to visualization data using existing function
+            if train_results and valid_results and final_selection.get('chosen_params'):
+                try:
+                    viz_data = _transform_visualization_data(
+                        train_results,
+                        valid_results,
+                        final_selection
+                    )
+                    visualization_data_by_model[model_name] = _convert_numpy_types(viz_data)
+                except Exception as e:
+                    logger.warning(f"Error transforming visualization data for {model_name}: {e}")
+                    visualization_data_by_model[model_name] = {}
+            else:
+                logger.warning(f"Insufficient data for {model_name} visualization")
+                visualization_data_by_model[model_name] = {}
+        
+        # Build unified response
+        response = {
+            "models": models,
+            "visualization_data": visualization_data_by_model,
+            "comparison_timestamp": comparison_data.get('comparison_timestamp')
+        }
+        
+        return _convert_numpy_types(response)
+        
+    except json_lib.JSONDecodeError as e:
+        logger.error(f"Error parsing comparison JSON: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Invalid JSON in comparison file: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Error loading comparison data: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error loading comparison data: {str(e)}"
+        )
 

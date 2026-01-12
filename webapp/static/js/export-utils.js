@@ -15,7 +15,8 @@ function generateExportHeader(currentPage) {
     const pages = [
         { id: 'index', name: 'Home', url: 'index.html', icon: '🏠' },
         { id: 'aggregate-stats', name: 'Aggregate Stats', url: 'aggregate-stats.html', icon: '📈' },
-        { id: 'model-comparison', name: 'Model Comparison', url: 'model-comparison.html', icon: '📊' }
+        { id: 'model-comparison', name: 'Model Comparison', url: 'model-comparison.html', icon: '📊' },
+        { id: 'grid-search-comparison', name: 'Grid Search Comparison', url: 'grid-search-comparison.html', icon: '📊' }
     ];
     
     let navLinks = '';

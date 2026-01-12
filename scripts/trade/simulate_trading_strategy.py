@@ -246,7 +246,7 @@ def get_aligned_data(
     # Build SQL query - join with pre-computed probabilities if model_name provided
     if model_name and model_prob_column:
         canonical_sql = f"""
-        SELECT 
+    SELECT 
             {", ".join(base_columns)}
         FROM derived.snapshot_features_v1 sf
         LEFT JOIN derived.model_probabilities_v1 mp
@@ -266,7 +266,7 @@ def get_aligned_data(
         WHERE sf.game_id = %s 
           AND sf.season_label = '2025-26'
         ORDER BY sf.sequence_number, sf.snapshot_ts
-        """
+    """
     
     query_start = time.time()
     canonical_rows = conn.execute(canonical_sql, (game_id,)).fetchall()

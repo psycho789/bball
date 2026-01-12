@@ -409,6 +409,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (route.view === 'grid-search') {
         // We're on the grid search page
         await showGridSearchPageView();
+    } else if (route.view === 'grid-search-comparison') {
+        // We're on the grid search comparison page
+        await showGridSearchComparisonPageView();
     } else if (route.view === 'model-comparison') {
         // We're on the model comparison page
         await showModelComparisonPageView();

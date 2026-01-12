@@ -1,0 +1,214 @@
+<div id="gridSearchComparisonView" style="display: none;">
+    <div class="simulation-container">
+        <div class="page-header">
+            <div>
+                <h2>Grid Search Model Comparison</h2>
+                <p class="page-header-subtitle">Compare ESPN and 4 ML models side-by-side</p>
+            </div>
+            <div class="export-buttons">
+                <button class="export-btn" id="exportComparisonHtmlBtn" onclick="exportGridSearchComparisonToHTML()" title="Export as standalone HTML file">
+                    📄 Export HTML
+                </button>
+                <button class="export-btn" id="exportComparisonImageBtn" onclick="exportGridSearchComparisonToImage()" title="Export as image (PNG)">
+                    🖼️ Export Image
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="comparisonLoading" class="grid-search-loading-overlay" style="display: none;">
+            <div class="grid-search-loading-content">
+                <div class="loading-spinner"></div>
+                <div class="grid-search-loading-text">
+                    <span>Loading comparison data...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Section -->
+        <div id="comparisonSummary" class="results-section" style="display: none;">
+            <h3>Summary Comparison</h3>
+            <div id="summaryTable" style="overflow-x: auto; margin-top: 1rem;"></div>
+        </div>
+
+        <!-- Heatmaps Section -->
+        <div id="comparisonHeatmaps" class="results-section" style="display: none;">
+            <!-- Profit Heatmap Training Set -->
+            <div class="heatmap-section" style="margin-bottom: 3rem;">
+                <h3>Profit Heatmaps (Training Set)</h3>
+                <p class="section-description" style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    All heatmaps use synchronized color scales for fair comparison. Darker green indicates higher profit.
+                </p>
+                <div id="heatmapGridTrain" class="heatmap-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-top: 1rem;">
+                    <!-- Heatmaps will be dynamically inserted here -->
+                </div>
+            </div>
+
+            <!-- Profit Heatmap Validation Set -->
+            <div class="heatmap-section" style="margin-bottom: 3rem;">
+                <h3>Profit Heatmaps (Validation Set)</h3>
+                <p class="section-description" style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    All heatmaps use synchronized color scales for fair comparison. Darker green indicates higher profit.
+                </p>
+                <div id="heatmapGridValid" class="heatmap-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-top: 1rem;">
+                    <!-- Heatmaps will be dynamically inserted here -->
+                </div>
+            </div>
+
+            <!-- Profit Factor Heatmap Validation Set -->
+            <div class="heatmap-section" style="margin-bottom: 3rem;">
+                <h3>Profit Factor Heatmaps (Validation Set)</h3>
+                <p class="section-description" style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    All heatmaps use synchronized color scales for fair comparison. Darker green indicates higher profit factor.
+                </p>
+                <div id="heatmapGridFactor" class="heatmap-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-top: 1rem;">
+                    <!-- Heatmaps will be dynamically inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Metrics Section -->
+        <div id="detailedMetrics" class="results-section" style="display: none;">
+            <h3>Detailed Metrics by Model</h3>
+            <div id="detailedMetricsContent" style="margin-top: 1rem;"></div>
+        </div>
+
+        <!-- Charts Section -->
+        <div id="comparisonCharts" class="results-section" style="display: none;">
+            <h3>Additional Visualizations</h3>
+            <div id="chartsGrid" style="display: grid; gap: 2rem; margin-top: 1rem;">
+                <div>
+                    <h4>Marginal Effects (All Models)</h4>
+                    <div style="position: relative; height: 400px; width: 100%;">
+                        <canvas id="marginalEffectsCanvas"></canvas>
+                    </div>
+                </div>
+                <div>
+                    <h4>Tradeoff: Trade Frequency vs. Profitability (All Models)</h4>
+                    <div style="position: relative; height: 400px; width: 100%;">
+                        <canvas id="tradeoffScatterCanvas"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Heatmap Modal -->
+<div id="heatmapModal" class="heatmap-modal">
+    <div class="heatmap-modal-content">
+        <div class="heatmap-modal-header">
+            <h3 id="modalTitle">Heatmap</h3>
+            <button class="heatmap-modal-close" onclick="closeHeatmapModal()">&times;</button>
+        </div>
+        <canvas id="modalHeatmapCanvas" class="heatmap-modal-canvas"></canvas>
+    </div>
+</div>
+
+<style>
+.heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1rem;
+}
+
+@media (max-width: 1200px) {
+    .heatmap-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .heatmap-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.model-heatmap-container {
+    background: var(--card-bg);
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.model-heatmap-container h5 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.model-heatmap-container canvas {
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.model-heatmap-container canvas:hover {
+    opacity: 0.9;
+}
+
+/* Modal styles */
+.heatmap-modal {
+    display: none;
+    position: fixed;
+    z-index: 10000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    overflow: auto;
+}
+
+.heatmap-modal-content {
+    position: relative;
+    margin: 2% auto;
+    padding: 2rem;
+    width: 90%;
+    max-width: 1200px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+}
+
+.heatmap-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.heatmap-modal-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.heatmap-modal-close {
+    color: var(--text-secondary);
+    font-size: 2rem;
+    font-weight: bold;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.heatmap-modal-close:hover {
+    color: var(--text-primary);
+}
+
+.heatmap-modal-canvas {
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+</style>
+
