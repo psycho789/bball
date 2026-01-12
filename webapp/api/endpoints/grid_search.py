@@ -92,6 +92,7 @@ get_game_ids_from_season = grid_search_module.get_game_ids_from_season
 split_games = grid_search_module.split_games
 run_simulation_for_games = grid_search_module.run_simulation_for_games
 process_combination = grid_search_module.process_combination
+load_model_artifact = grid_search_module.load_model_artifact
 
 # Import db_lib connect function (needed by process_combination)
 db_lib_path = os.path.join(os.path.dirname(__file__), '../../../scripts/lib/_db_lib.py')
@@ -180,6 +181,9 @@ def process_combination_with_pool(
     """
     entry_threshold, exit_threshold = combination
     
+    # Load model artifact once per combination (not per game)
+    model_artifact = load_model_artifact(config.model_name) if config.model_name else None
+    
     results = {
         'entry_threshold': entry_threshold,
         'exit_threshold': exit_threshold,
@@ -196,6 +200,7 @@ def process_combination_with_pool(
                 entry_threshold,
                 exit_threshold,
                 config,
+                model_artifact=model_artifact,
                 progress=progress,
                 task_id=task_id
             )
@@ -706,6 +711,39 @@ def _run_grid_search_background(
                     _grid_search_cache.set(cache_key, cache_data)
                     _grid_search_cache.save()  # Force immediate save to disk
                     logger.info(f"Grid search results cached with key: {cache_key[:32]}... (cache size: {len(_grid_search_cache.cache)})")
+                
+                # Also save results to standardized file location for future use
+                try:
+                    from pathlib import Path
+                    import json as json_lib
+                    output_dir = Path("data/grid_search") / cache_key
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Write final_selection.json
+                    final_selection = final_progress.get("final_selection", {})
+                    if final_selection:
+                        with open(output_dir / "final_selection.json", 'w') as f:
+                            json_lib.dump(final_selection, f, indent=2)
+                    
+                    # Write split results
+                    for split_name, results_key in [
+                        ('train', 'training_results'),
+                        ('valid', 'validation_results'),
+                        ('test', 'test_results')
+                    ]:
+                        results_list = final_progress.get(results_key, [])
+                        if results_list:
+                            json_path = output_dir / f"grid_results_{split_name}.json"
+                            json_data = {
+                                'metadata': final_progress.get('metadata', {}),
+                                'results': results_list
+                            }
+                            with open(json_path, 'w') as f:
+                                json_lib.dump(json_data, f, indent=2)
+                    
+                    logger.info(f"Grid search results saved to: {output_dir}")
+                except Exception as e:
+                    logger.warning(f"Error saving grid search results to files: {e}")
             else:
                 logger.warning(f"Grid search {request_id}: No cache_key found in final_progress, skipping cache. Keys in final_progress: {list(final_progress.keys())[:10]}")
         
@@ -1011,7 +1049,7 @@ def run_grid_search(
         model_name=model_name
     )
     
-    # Check cache first
+    # Check cache first (in-memory cache)
     with _grid_search_cache_lock:
         cached_result = _grid_search_cache.get(cache_key)
         if cached_result is not None:
@@ -1026,6 +1064,95 @@ def run_grid_search(
                 "status": "complete",
                 "cached": True
             }
+    
+    # Check for existing output files in standardized location
+    from pathlib import Path
+    output_dir = Path("data/grid_search") / cache_key
+    final_selection_path = output_dir / "final_selection.json"
+    
+    if final_selection_path.exists():
+        logger.info(f"Grid search files found at {output_dir}, loading from disk...")
+        try:
+            # Load results from files
+            import json as json_lib
+            with open(final_selection_path, 'r') as f:
+                final_selection = json_lib.load(f)
+            
+            # Load split results
+            training_results = []
+            validation_results = []
+            test_results = []
+            
+            for split_name in ['train', 'valid', 'test']:
+                json_path = output_dir / f"grid_results_{split_name}.json"
+                if json_path.exists():
+                    with open(json_path, 'r') as f:
+                        split_data = json_lib.load(f)
+                        results = split_data.get('results', [])
+                        if split_name == 'train':
+                            # Take top N for training results
+                            results_sorted = sorted(results, key=lambda x: x.get('net_profit_dollars', 0), reverse=True)
+                            training_results = results_sorted[:top_n]
+                        elif split_name == 'valid':
+                            validation_results = results
+                        elif split_name == 'test':
+                            test_results = results
+            
+            # Compute pattern_detection and visualization_data from loaded results
+            import pandas as pd
+            pattern_detection = {}
+            try:
+                train_df = pd.DataFrame(training_results)
+                valid_df = pd.DataFrame(validation_results)
+                pattern_detection = detect_patterns(train_df, valid_df)
+            except Exception as e:
+                logger.warning(f"Error detecting patterns from file: {e}")
+                pattern_detection = {"error": str(e)}
+            
+            visualization_data = {}
+            try:
+                visualization_data = _transform_visualization_data(training_results, validation_results, final_selection)
+            except Exception as e:
+                logger.warning(f"Error transforming visualization data from file: {e}")
+                visualization_data = {}
+            
+            # Load metadata if available
+            metadata = {}
+            train_json_path = output_dir / "grid_results_train.json"
+            if train_json_path.exists():
+                with open(train_json_path, 'r') as f:
+                    train_data = json_lib.load(f)
+                    metadata = train_data.get('metadata', {})
+            
+            # Store in progress tracking
+            request_id = str(uuid.uuid4())
+            with _grid_search_lock:
+                _grid_search_progress[request_id] = {
+                    "status": "complete",
+                    "current": metadata.get('num_combinations', 0),
+                    "total": metadata.get('num_combinations', 0),
+                    "final_selection": _convert_numpy_types(final_selection),
+                    "training_results": [_convert_numpy_types(r) for r in training_results],
+                    "validation_results": [_convert_numpy_types(r) for r in validation_results],
+                    "test_results": [_convert_numpy_types(r) for r in test_results],
+                    "pattern_detection": _convert_numpy_types(pattern_detection),
+                    "visualization_data": _convert_numpy_types(visualization_data),
+                    "metadata": _convert_numpy_types(metadata)
+                }
+            
+            # Also store in cache for future use
+            with _grid_search_cache_lock:
+                _grid_search_cache.set(cache_key, _grid_search_progress[request_id])
+            
+            logger.info(f"Grid search loaded from files: {output_dir}")
+            return {
+                "request_id": request_id,
+                "status": "complete",
+                "cached": True,
+                "source": "files"
+            }
+        except Exception as e:
+            logger.warning(f"Error loading grid search from files: {e}, will run grid search instead")
     
     logger.info(f"Grid search cache MISS for key: {cache_key[:32]}..., starting background task")
     

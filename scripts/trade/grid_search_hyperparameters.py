@@ -58,15 +58,24 @@ except ImportError:
     # Logger not yet defined, will log warning later if needed
 
 # Set up Rich console and logging
+# Rich Progress bar will stay at bottom, logs appear above it automatically
 console = Console(stderr=True)
 
 # Configure logging to use RichHandler for clean rendering under progress bar
+# RichHandler automatically detects active Progress context and renders logs above progress bar
 try:
     from webapp.api.logging_config import get_logger
     logger = get_logger(__name__)
     # Force RichHandler on root logger so all logs go through Rich
     root = logging.getLogger()
-    root.handlers = [RichHandler(console=console, rich_tracebacks=True, markup=False)]
+    # RichHandler automatically works with Rich Progress - no special config needed
+    root.handlers = [RichHandler(
+        console=console, 
+        rich_tracebacks=True, 
+        markup=False,
+        show_path=False,
+        show_time=False
+    )]
     root.setLevel(logging.INFO)
 except ImportError:
     # Fallback if webapp not available
@@ -74,7 +83,13 @@ except ImportError:
         level=logging.INFO,
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(console=console, rich_tracebacks=True, markup=False)]
+        handlers=[RichHandler(
+            console=console, 
+            rich_tracebacks=True, 
+            markup=False,
+            show_path=False,
+            show_time=False
+        )]
     )
     logger = logging.getLogger(__name__)
 
@@ -314,7 +329,8 @@ def run_simulation_for_games(
                 exclude_first_seconds=config.exclude_first_seconds,
                 exclude_last_seconds=config.exclude_last_seconds,
                 use_trade_data=config.use_trade_data,
-                model_artifact=model_artifact
+                model_artifact=model_artifact,
+                model_name=config.model_name
             )
             
             if not aligned_data:
@@ -665,7 +681,7 @@ def main():
     
     # Other parameters
     parser.add_argument('--min-trade-count', type=int, default=200, help='Minimum trades for valid combo (default: 200)')
-    parser.add_argument('--output-dir', type=str, default='grid_search_results', help='Output directory (default: grid_search_results)')
+    parser.add_argument('--output-dir', type=str, default=None, help='Output directory (default: data/grid_search/{cache_key}/ or grid_search_results if no cache)')
     parser.add_argument('--train-ratio', type=float, default=0.70, help='Train split ratio (default: 0.70)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed debug logs (default: False)')
     parser.add_argument('--valid-ratio', type=float, default=0.15, help='Validation split ratio (default: 0.15)')
@@ -703,11 +719,52 @@ def main():
     if abs(total_ratio - 1.0) > 0.01:
         parser.error(f"Split ratios must sum to 1.0 (got {total_ratio})")
     
+    # Generate cache key early to determine default output directory
+    cache_key = None
+    if args.season and CACHE_AVAILABLE and not args.no_cache:
+        try:
+            cache_key = _generate_grid_search_cache_key(
+                season=args.season,
+                entry_min=args.entry_min,
+                entry_max=args.entry_max,
+                entry_step=args.entry_step,
+                exit_min=args.exit_min,
+                exit_max=args.exit_max,
+                exit_step=args.exit_step,
+                bet_amount=args.bet_amount,
+                enable_fees=args.enable_fees,
+                slippage_rate=args.slippage_rate,
+                exclude_first_seconds=args.exclude_first_seconds,
+                exclude_last_seconds=args.exclude_last_seconds,
+                use_trade_data=args.use_trade_data,
+                train_ratio=args.train_ratio,
+                valid_ratio=args.valid_ratio,
+                test_ratio=args.test_ratio,
+                top_n=args.top_n,
+                min_trade_count=args.min_trade_count,
+                max_games=args.max_games,
+                seed=args.seed,
+                model_name=args.model_name
+            )
+        except Exception as e:
+            logger.debug(f"Cache key generation failed: {e}. Will use default output directory.")
+    
+    # Determine output directory
+    if args.output_dir:
+        # User specified output directory (override)
+        output_dir = Path(args.output_dir)
+    elif cache_key:
+        # Use standardized location based on cache key
+        output_dir = Path("data/grid_search") / cache_key
+    else:
+        # Fallback to old default
+        output_dir = Path("grid_search_results")
+    
     # Create output directory
-    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = output_dir / 'plots'
     plots_dir.mkdir(exist_ok=True)
+    logger.info(f"Output directory: {output_dir}")
     
     # Create config
     config = GridSearchConfig(
@@ -737,33 +794,9 @@ def main():
     # Get database connection
     dsn = get_dsn(args.dsn)
     
-    # Generate cache key (only for season-based searches, not game-list)
-    cache_key = None
-    if args.season and CACHE_AVAILABLE and not args.no_cache:
+    # Try to load from cache (cache_key already generated above)
+    if cache_key and CACHE_AVAILABLE and not args.no_cache:
         try:
-            cache_key = _generate_grid_search_cache_key(
-                season=args.season,
-                entry_min=args.entry_min,
-                entry_max=args.entry_max,
-                entry_step=args.entry_step,
-                exit_min=args.exit_min,
-                exit_max=args.exit_max,
-                exit_step=args.exit_step,
-                bet_amount=args.bet_amount,
-                enable_fees=args.enable_fees,
-                slippage_rate=args.slippage_rate,
-                exclude_first_seconds=args.exclude_first_seconds,
-                exclude_last_seconds=args.exclude_last_seconds,
-                use_trade_data=args.use_trade_data,
-                train_ratio=args.train_ratio,
-                valid_ratio=args.valid_ratio,
-                test_ratio=args.test_ratio,
-                top_n=args.top_n,
-                min_trade_count=args.min_trade_count,
-                max_games=args.max_games,
-                seed=args.seed
-            )
-            
             # Try to load from cache
             if load_from_cache(cache_key, output_dir, args.season):
                 logger.info("Grid search complete (loaded from cache).")
@@ -872,17 +905,24 @@ def main():
     total_work_units = len(combinations) * total_games
     
     # Create Rich Progress object for sticky progress bar
+    # The progress bar will stay at the bottom of the terminal
+    # Logs will appear above it automatically when RichHandler detects the Progress context
     progress = Progress(
         SpinnerColumn(),
-        TextColumn("[bold]Grid search[/bold]"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        TextColumn("• {task.percentage:>5.1f}%"),
+        TextColumn("[bold blue]Grid search[/bold blue]"),
+        BarColumn(bar_width=None),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("•"),
+        TextColumn("[cyan]{task.completed}/{task.total}[/cyan]"),
+        TextColumn("•"),
         TimeElapsedColumn(),
+        TextColumn("•"),
         TimeRemainingColumn(),
-        TextColumn("• {task.fields[current]}"),
+        TextColumn("•"),
+        TextColumn("[dim]{task.fields[current]}[/dim]"),
         console=console,
         transient=False,  # Keep it visible at the end
+        refresh_per_second=4,  # Update 4 times per second (smooth but not too frequent)
     )
     
     task_id = progress.add_task(
