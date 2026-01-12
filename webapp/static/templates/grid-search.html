@@ -32,6 +32,19 @@
                                 <span id="seasonError" class="error-message" style="display: none;"></span>
                             </div>
 
+                            <!-- Model Selection -->
+                            <div class="sim-input-group">
+                                <label for="modelName">Win Probability Model:</label>
+                                <select id="modelName">
+                                    <option value="">ESPN Probabilities (Default)</option>
+                                    <option value="logreg_platt">Logistic Regression + Platt</option>
+                                    <option value="logreg_isotonic">Logistic Regression + Isotonic</option>
+                                    <option value="catboost_platt">CatBoost + Platt</option>
+                                    <option value="catboost_isotonic">CatBoost + Isotonic</option>
+                                </select>
+                                <span class="input-hint">Select model to use for win probability predictions</span>
+                            </div>
+
                             <!-- Entry Threshold Range -->
                             <fieldset class="range-fieldset">
                                 <legend>Entry Threshold Range</legend>

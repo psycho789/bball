@@ -371,6 +371,14 @@ async function exportComparisonToHTML() {
             </script>
         `;
         
+        // Generate shared header
+        const exportHeader = typeof generateExportHeader === 'function' 
+            ? generateExportHeader('model-comparison')
+            : '';
+        const exportHeaderCSS = typeof generateExportHeaderCSS === 'function'
+            ? generateExportHeaderCSS()
+            : '';
+        
         // Build complete HTML
         const htmlContent = `<!DOCTYPE html>
 <html lang="en">
@@ -378,19 +386,26 @@ async function exportComparisonToHTML() {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Model Comparison - 2×2 Matrix</title>
-    <style>${cssContent}</style>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="alternate icon" href="favicon.svg">
+    <link rel="apple-touch-icon" href="favicon.svg">
+    <style>${cssContent}
+${exportHeaderCSS}</style>
     ${chartInitCode}
 </head>
 <body>
-    <div class="stats-page-view" style="display: block;">
-        <div class="page-header">
-            <div>
-                <h2>Model Comparison</h2>
-                <p class="page-header-subtitle">2×2 Matrix: Logistic Regression vs CatBoost × Platt vs Isotonic Calibration</p>
+    <div class="container">
+        ${exportHeader}
+        <div class="stats-page-view" style="display: block;">
+            <div class="page-header">
+                <div>
+                    <h2>Model Comparison</h2>
+                    <p class="page-header-subtitle">2×2 Matrix: Logistic Regression vs CatBoost × Platt vs Isotonic Calibration</p>
+                </div>
             </div>
-        </div>
-        <div class="model-comparison-container" id="modelComparisonContainer">
-            ${containerHtml}
+            <div class="model-comparison-container" id="modelComparisonContainer">
+                ${containerHtml}
+            </div>
         </div>
     </div>
 </body>

@@ -166,6 +166,12 @@ async function runGridSearch() {
         min_trade_count: parseInt(document.getElementById('minTradeCount').value)
     };
     
+    // Add model_name if provided (optional parameter)
+    const modelNameSelect = document.getElementById('modelName');
+    if (modelNameSelect && modelNameSelect.value && modelNameSelect.value.trim() !== '') {
+        params.model_name = modelNameSelect.value;
+    }
+    
     // Add max_games if provided (optional parameter)
     const maxGamesInput = document.getElementById('maxGames').value;
     if (maxGamesInput && maxGamesInput.trim() !== '') {

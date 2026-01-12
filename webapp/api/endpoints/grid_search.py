@@ -341,7 +341,8 @@ def _run_grid_search_background(
     max_games: Optional[int],
     workers: int,
     seed: int,
-    dsn: str
+    dsn: str,
+    model_name: Optional[str] = None
 ):
     """Background task to run grid search."""
     try:
@@ -385,7 +386,8 @@ def _run_grid_search_background(
             bet_amount=bet_amount,
             use_trade_data=use_trade_data,
             exclude_first_seconds=exclude_first_seconds,
-            exclude_last_seconds=exclude_last_seconds
+            exclude_last_seconds=exclude_last_seconds,
+            model_name=model_name
         )
         
         # Get game IDs
@@ -744,7 +746,8 @@ def _generate_grid_search_cache_key(
     top_n: int,
     min_trade_count: int,
     max_games: Optional[int] = None,
-    seed: int = 42
+    seed: int = 42,
+    model_name: Optional[str] = None
 ) -> str:
     """
     Generate a cache key for grid search results.
@@ -772,7 +775,8 @@ def _generate_grid_search_cache_key(
         "top_n": top_n,
         "min_trade_count": min_trade_count,
         "max_games": max_games,
-        "seed": seed
+        "seed": seed,
+        "model_name": model_name
     }
     # Create deterministic JSON string and hash it
     params_json = json_lib.dumps(cache_params, sort_keys=True)
@@ -945,6 +949,7 @@ def run_grid_search(
     top_n: int = Query(10, description="Top N train combos to consider for selection"),
     min_trade_count: int = Query(200, description="Minimum trades required for valid combo"),
     max_games: Optional[int] = Query(None, description="Limit number of games for testing (default: no limit)"),
+    model_name: Optional[str] = Query(None, description="Model name: 'logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic', or None for ESPN probabilities"),
 ) -> dict[str, Any]:
     """
     Start a grid search hyperparameter optimization.
@@ -1002,7 +1007,8 @@ def run_grid_search(
         top_n=top_n,
         min_trade_count=min_trade_count,
         max_games=max_games,
-        seed=seed
+        seed=seed,
+        model_name=model_name
     )
     
     # Check cache first
@@ -1063,6 +1069,7 @@ def run_grid_search(
             max_games,
             workers,
             seed,
+            model_name,
             dsn
         ),
         daemon=True

@@ -44,6 +44,9 @@ from scripts.lib._db_lib import get_dsn, connect
 # Import simulation functions
 from scripts.trade.simulate_trading_strategy import get_aligned_data, simulate_trading_strategy
 
+# Import model loading
+from scripts.lib._winprob_lib import load_artifact, WinProbArtifact
+
 # Import cache utilities for shared caching with webapp
 try:
     from webapp.api.cache import SimpleCache
@@ -99,6 +102,41 @@ class GridSearchConfig:
     use_trade_data: bool = True
     exclude_first_seconds: int = 60
     exclude_last_seconds: int = 60
+    model_name: Optional[str] = None  # Model name: 'logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic', or None for ESPN
+
+
+def load_model_artifact(model_name: Optional[str]) -> Optional[WinProbArtifact]:
+    """
+    Load model artifact by name. Returns None if model_name is None.
+    
+    Args:
+        model_name: Model name ('logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic') or None
+    
+    Returns:
+        WinProbArtifact object or None if model_name is None
+    
+    Raises:
+        ValueError: If model_name is not recognized
+        FileNotFoundError: If model file does not exist
+    """
+    if model_name is None:
+        return None
+    
+    model_file_map = {
+        "logreg_platt": "data/models/winprob_logreg_platt_2017-2023.json",
+        "logreg_isotonic": "data/models/winprob_logreg_isotonic_2017-2023.json",
+        "catboost_platt": "data/models/winprob_catboost_platt_2017-2023.json",
+        "catboost_isotonic": "data/models/winprob_catboost_isotonic_2017-2023.json",
+    }
+    
+    if model_name not in model_file_map:
+        raise ValueError(f"Unknown model name: {model_name}. Valid options: {list(model_file_map.keys())}")
+    
+    model_path = Path(model_file_map[model_name])
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    
+    return load_artifact(model_path)
 
 
 def generate_grid(config: GridSearchConfig) -> list[tuple[float, float]]:
@@ -239,6 +277,7 @@ def run_simulation_for_games(
     entry_threshold: float,
     exit_threshold: float,
     config: GridSearchConfig,
+    model_artifact: Optional[WinProbArtifact] = None,
     progress: Optional[Any] = None,
     task_id: Optional[int] = None
 ) -> dict[str, Any]:
@@ -274,7 +313,8 @@ def run_simulation_for_games(
                 game_id,
                 exclude_first_seconds=config.exclude_first_seconds,
                 exclude_last_seconds=config.exclude_last_seconds,
-                use_trade_data=config.use_trade_data
+                use_trade_data=config.use_trade_data,
+                model_artifact=model_artifact
             )
             
             if not aligned_data:
@@ -402,6 +442,9 @@ def process_combination(
     """
     entry_threshold, exit_threshold = combination
     
+    # Load model artifact once per combination (not per game)
+    model_artifact = load_model_artifact(config.model_name) if config.model_name else None
+    
     results = {
         'entry_threshold': entry_threshold,
         'exit_threshold': exit_threshold,
@@ -417,6 +460,7 @@ def process_combination(
                 entry_threshold,
                 exit_threshold,
                 config,
+                model_artifact=model_artifact,
                 progress=progress,
                 task_id=task_id
             )
@@ -639,6 +683,10 @@ def main():
     parser.add_argument('--max-combinations', type=int, help='Limit number of combinations for testing (default: no limit)')
     parser.add_argument('--no-cache', action='store_true', help='Skip cache check and force fresh run')
     
+    # Model selection
+    parser.add_argument('--model-name', type=str, default=None, 
+                       help='Model name: "logreg_platt", "logreg_isotonic", "catboost_platt", "catboost_isotonic", or None for ESPN probabilities (default: None)')
+    
     args = parser.parse_args()
     
     # Set logging level based on verbose flag
@@ -682,7 +730,8 @@ def main():
         bet_amount=args.bet_amount,
         use_trade_data=args.use_trade_data,
         exclude_first_seconds=args.exclude_first_seconds,
-        exclude_last_seconds=args.exclude_last_seconds
+        exclude_last_seconds=args.exclude_last_seconds,
+        model_name=args.model_name
     )
     
     # Get database connection

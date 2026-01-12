@@ -22,11 +22,13 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import psycopg
+import numpy as np
 
 # Add project root to path to import from scripts and webapp
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from scripts.lib._db_lib import get_dsn, connect
+from scripts.lib._winprob_lib import WinProbArtifact, build_design_matrix, predict_proba
 
 # Set up logger - use same logger as webapp for consistency
 try:
@@ -87,7 +89,8 @@ def get_aligned_data(
     game_id: str,
     exclude_first_seconds: int = 0,
     exclude_last_seconds: int = 0,
-    use_trade_data: bool = False
+    use_trade_data: bool = False,
+    model_artifact: Optional[WinProbArtifact] = None
 ) -> tuple[list[dict[str, Any]], Optional[int], Optional[int], Optional[int]]:
     """
     Get aligned ESPN and Kalshi data for a game from canonical dataset.
@@ -117,6 +120,7 @@ def get_aligned_data(
         exclude_first_seconds: Exclude first N seconds of game
         exclude_last_seconds: Exclude last N seconds of game
         use_trade_data: **DEPRECATED** - Canonical dataset uses candlestick data. This parameter is ignored.
+        model_artifact: Optional WinProbArtifact for model-based probability generation. If None, uses ESPN probabilities.
     
     Returns:
         (aligned_data, game_start_timestamp, game_duration_seconds, actual_outcome)
@@ -194,17 +198,35 @@ def get_aligned_data(
     
     # Query canonical dataset - single query gets everything we need
     # Query both home and away Kalshi fields to enable away→home conversion when home data is missing
-    canonical_sql = """
+    # If model provided, also query game state features needed for model scoring
+    base_columns = [
+        "snapshot_ts",
+        "espn_home_prob",
+        "kalshi_home_mid_price",
+        "kalshi_home_bid",
+        "kalshi_home_ask",
+        "kalshi_away_mid_price",
+        "kalshi_away_bid",
+        "kalshi_away_ask",
+        "time_remaining"
+    ]
+    
+    # Add model features if model is provided
+    if model_artifact is not None:
+        base_columns.append("score_diff")  # Required for point_differential
+        # Add interaction terms if model uses them
+        if any("score_diff_div_sqrt" in fn for fn in model_artifact.feature_names):
+            base_columns.append("score_diff_div_sqrt_time_remaining")
+        if any("espn_home_prob_lag_1" in fn for fn in model_artifact.feature_names):
+            base_columns.append("espn_home_prob_lag_1")
+        if any("espn_home_prob_delta_1" in fn for fn in model_artifact.feature_names):
+            base_columns.append("espn_home_prob_delta_1")
+        if any("period" in fn for fn in model_artifact.feature_names):
+            base_columns.append("period")
+    
+    canonical_sql = f"""
     SELECT 
-        snapshot_ts,
-        espn_home_prob,
-        kalshi_home_mid_price,
-        kalshi_home_bid,
-        kalshi_home_ask,
-        kalshi_away_mid_price,
-        kalshi_away_bid,
-        kalshi_away_ask,
-        time_remaining
+        {", ".join(base_columns)}
     FROM derived.snapshot_features_v1
     WHERE game_id = %s 
       AND season_label = '2025-26'
@@ -420,9 +442,94 @@ def get_aligned_data(
             logger.warning(f"[ALIGN_DATA] Game {game_id}: Kalshi ask out of range: {kalshi_ask}, setting to None")
             kalshi_ask = None
         
+        # If model provided, score this snapshot and use model probability instead of ESPN
+        final_prob = float(espn_home_prob)  # Default to ESPN probability
+        if model_artifact is not None:
+            try:
+                # Extract model features from row
+                # Row indices: 0=snapshot_ts, 1=espn_home_prob, 2-7=kalshi, 8=time_remaining
+                # Additional indices if model features present: 9=score_diff, 10+=optional features
+                row_idx = 9  # Start after base columns
+                score_diff = row[row_idx] if len(row) > row_idx else None
+                row_idx += 1
+                
+                # Extract optional features if present
+                score_diff_div_sqrt_time_remaining = None
+                espn_home_prob_lag_1 = None
+                espn_home_prob_delta_1 = None
+                period_val = None
+                
+                if any("score_diff_div_sqrt" in fn for fn in model_artifact.feature_names):
+                    score_diff_div_sqrt_time_remaining = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                if any("espn_home_prob_lag_1" in fn for fn in model_artifact.feature_names):
+                    espn_home_prob_lag_1 = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                if any("espn_home_prob_delta_1" in fn for fn in model_artifact.feature_names):
+                    espn_home_prob_delta_1 = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                if any("period" in fn for fn in model_artifact.feature_names):
+                    period_val = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                
+                # Validate required features
+                if score_diff is None or time_remaining is None:
+                    logger.warning(f"[ALIGN_DATA] Game {game_id}: Missing required model features (score_diff or time_remaining), using ESPN prob")
+                else:
+                    # Build design matrix for single snapshot
+                    point_differential = np.array([float(score_diff)])
+                    time_remaining_regulation = np.array([float(time_remaining)])
+                    possession = ["unknown"]  # Canonical dataset doesn't have possession, default to unknown
+                    
+                    # Build optional arrays
+                    score_diff_div_sqrt_arr = None
+                    if score_diff_div_sqrt_time_remaining is not None:
+                        score_diff_div_sqrt_arr = np.array([float(score_diff_div_sqrt_time_remaining)])
+                    
+                    espn_prob_arr = None
+                    if any("espn_home_prob" in fn for fn in model_artifact.feature_names):
+                        espn_prob_arr = np.array([float(espn_home_prob)])
+                    
+                    espn_prob_lag_1_arr = None
+                    if espn_home_prob_lag_1 is not None:
+                        espn_prob_lag_1_arr = np.array([float(espn_home_prob_lag_1)])
+                    
+                    espn_prob_delta_1_arr = None
+                    if espn_home_prob_delta_1 is not None:
+                        espn_prob_delta_1_arr = np.array([float(espn_home_prob_delta_1)])
+                    
+                    period_arr = None
+                    if period_val is not None:
+                        period_arr = [int(period_val)]
+                    
+                    # Build design matrix
+                    X = build_design_matrix(
+                        point_differential=point_differential,
+                        time_remaining_regulation=time_remaining_regulation,
+                        possession=possession,
+                        preprocess=model_artifact.preprocess,
+                        score_diff_div_sqrt_time_remaining=score_diff_div_sqrt_arr,
+                        espn_home_prob=espn_prob_arr,
+                        espn_home_prob_lag_1=espn_prob_lag_1_arr,
+                        espn_home_prob_delta_1=espn_prob_delta_1_arr,
+                        period=period_arr
+                    )
+                    
+                    # Predict probability
+                    prob_array = predict_proba(model_artifact, X=X)
+                    final_prob = float(prob_array[0])
+                    
+                    # Validate model probability is in [0,1]
+                    if final_prob < 0.0 or final_prob > 1.0:
+                        logger.warning(f"[ALIGN_DATA] Game {game_id}: Model prob out of range: {final_prob}, using ESPN prob")
+                        final_prob = float(espn_home_prob)
+            except Exception as e:
+                logger.warning(f"[ALIGN_DATA] Game {game_id}: Error scoring model: {e}, using ESPN prob")
+                final_prob = float(espn_home_prob)
+        
         aligned_data.append({
             "timestamp": aligned_timestamp,
-            "espn_prob": float(espn_home_prob),  # Already checked for None above
+            "espn_prob": final_prob,  # May be model probability if model provided
             "kalshi_price": float(kalshi_price),  # Already checked for None above
             "kalshi_bid": float(kalshi_bid) if kalshi_bid is not None else None,
             "kalshi_ask": float(kalshi_ask) if kalshi_ask is not None else None,

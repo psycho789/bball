@@ -1430,6 +1430,14 @@ async function exportToHTML() {
         // Clone the container to avoid modifying the original
         const clonedContainer = container.cloneNode(true);
         
+        // Generate shared header
+        const exportHeader = typeof generateExportHeader === 'function' 
+            ? generateExportHeader('aggregate-stats')
+            : '';
+        const exportHeaderCSS = typeof generateExportHeaderCSS === 'function'
+            ? generateExportHeaderCSS()
+            : '';
+        
         // Create standalone HTML with embedded data and Chart.js rendering code
         const htmlContent = `<!DOCTYPE html>
 <html lang="en">
@@ -1437,13 +1445,18 @@ async function exportToHTML() {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aggregate Statistics Export - ${new Date().toLocaleDateString()}</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="alternate icon" href="favicon.svg">
+    <link rel="apple-touch-icon" href="favicon.svg">
     <style>
 ${cssContent}
+${exportHeaderCSS}
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
+        ${exportHeader}
         <div class="stats-page-header">
             <div>
                 <h2>Aggregate Statistics</h2>
