@@ -25,9 +25,11 @@ async function loadGridSearchComparison() {
         // Show loading indicator
         if (loading) loading.style.display = 'flex';
         if (summary) summary.style.display = 'none';
+        const parameters = document.getElementById('gridSearchParameters');
         if (heatmaps) heatmaps.style.display = 'none';
         if (detailed) detailed.style.display = 'none';
         if (charts) charts.style.display = 'none';
+        if (parameters) parameters.style.display = 'none';
         
         const response = await fetch('/api/grid-search/comparison');
         if (!response.ok) {
@@ -43,9 +45,10 @@ async function loadGridSearchComparison() {
         
         // Render all sections
         renderComparisonSummary(data);
+        renderGridSearchParameters(data);
         renderComparisonHeatmaps(data);
-        renderDetailedMetrics(data);
         renderComparisonCharts(data);
+        renderDetailedMetrics(data);
         
     } catch (error) {
         console.error('Error loading grid search comparison:', error);
@@ -158,6 +161,56 @@ function renderComparisonSummary(data) {
     
     container.innerHTML = html;
     document.getElementById('comparisonSummary').style.display = 'block';
+}
+
+/**
+ * Render grid search parameters from metadata
+ */
+function renderGridSearchParameters(data) {
+    const container = document.getElementById('parametersContent');
+    if (!container || !data.models || data.models.length === 0) return;
+    
+    // Get parameters from first model's metadata (all should be the same)
+    const firstModel = data.models[0];
+    const args = firstModel.metadata?.args;
+    
+    if (!args) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">Parameters not available in metadata.</p>';
+        document.getElementById('gridSearchParameters').style.display = 'block';
+        return;
+    }
+    
+    // Format parameters - be careful with integers vs floats
+    const formatValue = (val) => {
+        if (val === null || val === undefined) return 'N/A';
+        if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+        if (typeof val === 'number') {
+            // For integers, return as-is
+            if (Number.isInteger(val)) {
+                return val.toString();
+            }
+            // For floats, remove trailing zeros after decimal point only
+            return val.toString().replace(/\.0+$/, '');
+        }
+        return String(val);
+    };
+    
+    const html = `
+        <div style="background: var(--bg-card); padding: 1rem 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+            <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                <div><span style="color: var(--text-secondary);">Entry:</span> <strong>${formatValue(args.entry_min)} - ${formatValue(args.entry_max)} (step ${formatValue(args.entry_step)})</strong></div>
+                <div><span style="color: var(--text-secondary);">Exit:</span> <strong>${formatValue(args.exit_min)} - ${formatValue(args.exit_max)} (step ${formatValue(args.exit_step)})</strong></div>
+                <div><span style="color: var(--text-secondary);">Fees:</span> <strong>${formatValue(args.enable_fees)}</strong></div>
+                <div><span style="color: var(--text-secondary);">Slippage:</span> <strong>${formatValue(args.slippage_rate)}</strong></div>
+                <div><span style="color: var(--text-secondary);">Min Trades:</span> <strong>${formatValue(args.min_trade_count)}</strong></div>
+                <div><span style="color: var(--text-secondary);">Split:</span> <strong>${formatValue(args.train_ratio)}/${formatValue(args.valid_ratio)}/${formatValue(args.test_ratio)}</strong></div>
+                <div><span style="color: var(--text-secondary);">Exclude:</span> <strong>${formatValue(args.exclude_first_seconds)}s/${formatValue(args.exclude_last_seconds)}s</strong></div>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+    document.getElementById('gridSearchParameters').style.display = 'block';
 }
 
 /**
@@ -397,37 +450,16 @@ function renderDetailedMetrics(data) {
         const chosenParams = model.chosen_params || {};
         
         html += `
-            <div class="summary-card" style="background: var(--card-bg); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin: 0 0 1rem 0;">${model.model_name}</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                    <div>
-                        <div class="summary-label">Test Profit</div>
-                        <div class="summary-value">$${testMetrics.net_profit_dollars?.toFixed(2) || 'N/A'}</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Trades</div>
-                        <div class="summary-value">${testMetrics.num_trades || 'N/A'}</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Win Rate</div>
-                        <div class="summary-value">${testMetrics.win_rate ? (testMetrics.win_rate * 100).toFixed(1) + '%' : 'N/A'}</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Profit Factor</div>
-                        <div class="summary-value">${testMetrics.profit_factor?.toFixed(2) || 'N/A'}</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Max Drawdown</div>
-                        <div class="summary-value">$${testMetrics.max_drawdown?.toFixed(2) || 'N/A'}</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Entry Threshold</div>
-                        <div class="summary-value">${chosenParams.entry_threshold?.toFixed(3) || 'N/A'}</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Exit Threshold</div>
-                        <div class="summary-value">${chosenParams.exit_threshold?.toFixed(3) || 'N/A'}</div>
-                    </div>
+            <div class="summary-card" style="background: var(--card-bg); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">${model.model_name}</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                    <div><span style="color: var(--text-secondary);">Test Profit:</span> <strong>$${testMetrics.net_profit_dollars?.toFixed(2) || 'N/A'}</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Trades:</span> <strong>${testMetrics.num_trades || 'N/A'}</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Win Rate:</span> <strong>${testMetrics.win_rate ? (testMetrics.win_rate * 100).toFixed(1) + '%' : 'N/A'}</strong></div>
+                    <div><span style="color: var(--text-secondary);">Profit Factor:</span> <strong>${testMetrics.profit_factor?.toFixed(2) || 'N/A'}</strong></div>
+                    <div><span style="color: var(--text-secondary);">Max Drawdown:</span> <strong>$${testMetrics.max_drawdown?.toFixed(2) || 'N/A'}</strong></div>
+                    <div><span style="color: var(--text-secondary);">Entry:</span> <strong>${chosenParams.entry_threshold?.toFixed(3) || 'N/A'}</strong></div>
+                    <div><span style="color: var(--text-secondary);">Exit:</span> <strong>${chosenParams.exit_threshold?.toFixed(3) || 'N/A'}</strong></div>
                 </div>
             </div>
         `;
@@ -698,6 +730,23 @@ async function exportGridSearchComparisonToHTML() {
         // Show all sections
         const sections = viewClone.querySelectorAll('.results-section');
         sections.forEach(section => section.style.display = 'block');
+        
+        // Add export timestamp to page header
+        const pageHeader = viewClone.querySelector('.page-header');
+        if (pageHeader) {
+            const subtitle = pageHeader.querySelector('.page-header-subtitle');
+            if (subtitle) {
+                // Check if timestamp already exists (avoid duplicates)
+                const existingTimestamp = pageHeader.querySelector('.export-timestamp');
+                if (!existingTimestamp) {
+                    const timestamp = document.createElement('p');
+                    timestamp.className = 'export-timestamp';
+                    timestamp.style.cssText = 'color: var(--text-muted); font-size: 0.75rem; margin-top: 8px;';
+                    timestamp.textContent = `Exported on ${new Date().toLocaleString()}`;
+                    subtitle.parentNode.insertBefore(timestamp, subtitle.nextSibling);
+                }
+            }
+        }
         
         // Get modal HTML from template (it's outside the view, so get it separately)
         const modalElement = document.getElementById('heatmapModal');
@@ -1249,6 +1298,38 @@ async function exportGridSearchComparisonToImage() {
     }
     
     try {
+        // Convert tooltips to visible text for image export (like stats.js)
+        const tooltipIcons = view.querySelectorAll('.tooltip-icon');
+        const addedTooltipTexts = [];
+        
+        tooltipIcons.forEach(tooltipIcon => {
+            const tooltipText = tooltipIcon.getAttribute('title') || '';
+            if (tooltipText) {
+                // Find the parent header
+                const header = tooltipIcon.closest('h3');
+                if (header) {
+                    // Create visible tooltip text element
+                    const tooltipElement = document.createElement('div');
+                    tooltipElement.className = 'chart-tooltip-text';
+                    tooltipElement.textContent = tooltipText;
+                    tooltipElement.style.cssText = `
+                        font-size: 0.7rem;
+                        color: var(--text-secondary);
+                        margin-top: 4px;
+                        margin-bottom: 8px;
+                        line-height: 1.4;
+                        padding: 6px 8px;
+                        background: rgba(0, 0, 0, 0.3);
+                        border-radius: 4px;
+                        max-width: 100%;
+                    `;
+                    // Insert after the header
+                    header.parentNode.insertBefore(tooltipElement, header.nextSibling);
+                    addedTooltipTexts.push(tooltipElement);
+                }
+            }
+        });
+        
         // Wait for charts/canvases to be fully rendered
         await new Promise(resolve => setTimeout(resolve, 500));
         
@@ -1264,6 +1345,9 @@ async function exportGridSearchComparisonToImage() {
             logging: false,
             useCORS: true
         });
+        
+        // Remove added tooltip text elements after capture
+        addedTooltipTexts.forEach(el => el.remove());
         
         // Convert to blob and download
         canvas.toBlob((blob) => {

@@ -1262,20 +1262,22 @@ body {
     cursor: help;
     position: relative;
     vertical-align: middle;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 0.75rem;
     line-height: 16px;
     text-align: center;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--text-secondary);
     border-radius: 50%;
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     transition: all 0.2s ease;
+    opacity: 0.8;
 }
 
 .tooltip-icon:hover {
     color: var(--accent-highlight);
     border-color: var(--accent-highlight);
     background: var(--bg-card);
+    opacity: 1;
 }
 
 .tooltip-content {
@@ -1285,14 +1287,15 @@ body {
     left: 50%;
     transform: translateX(-50%);
     margin-bottom: 8px;
-    width: 300px;
-    padding: 12px;
+    width: 320px;
+    max-width: 90vw;
+    padding: 10px 12px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     z-index: 1000;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     line-height: 1.5;
     color: var(--text-primary);
     pointer-events: none;

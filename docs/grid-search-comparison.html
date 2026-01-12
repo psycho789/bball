@@ -1269,20 +1269,22 @@ body {
     cursor: help;
     position: relative;
     vertical-align: middle;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 0.75rem;
     line-height: 16px;
     text-align: center;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--text-secondary);
     border-radius: 50%;
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     transition: all 0.2s ease;
+    opacity: 0.8;
 }
 
 .tooltip-icon:hover {
     color: var(--accent-highlight);
     border-color: var(--accent-highlight);
     background: var(--bg-card);
+    opacity: 1;
 }
 
 .tooltip-content {
@@ -1292,14 +1294,15 @@ body {
     left: 50%;
     transform: translateX(-50%);
     margin-bottom: 8px;
-    width: 300px;
-    padding: 12px;
+    width: 320px;
+    max-width: 90vw;
+    padding: 10px 12px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     z-index: 1000;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     line-height: 1.5;
     color: var(--text-primary);
     pointer-events: none;
@@ -11540,7 +11543,7 @@ h5 {
         <div class="page-header">
             <div>
                 <h2>Grid Search Model Comparison</h2>
-                <p class="page-header-subtitle">Compare ESPN and 4 ML models side-by-side</p>
+                <p class="page-header-subtitle">Compare ESPN and 4 ML models side-by-side</p><p class="export-timestamp" style="color: var(--text-muted); font-size: 0.75rem; margin-top: 8px;">Exported on 1/12/2026, 12:54:14 PM</p>
             </div>
             
         </div>
@@ -11557,7 +11560,16 @@ h5 {
 
         <!-- Summary Section -->
         <div id="comparisonSummary" class="results-section" style="display: block;">
-            <h3>Summary Comparison</h3>
+            <h3>
+                Summary Comparison
+                <span class="tooltip-icon" title="Test set performance metrics for each model. Models are sorted by test profit. The 'Improvement' column shows percentage change vs. ESPN baseline.">
+                    ?
+                    <span class="tooltip-content">
+                        <strong>What is this?</strong>
+                        <p>Test set performance metrics for each model. Models are sorted by test profit. The 'Improvement' column shows percentage change vs. ESPN baseline.</p>
+                    </span>
+                </span>
+            </h3>
             <div id="summaryTable" style="overflow-x: auto; margin-top: 1rem;">
         <table class="results-table" style="width: 100%; border-collapse: collapse;">
             <thead>
@@ -11634,11 +11646,50 @@ h5 {
     </div>
         </div>
 
+        <!-- Grid Search Parameters Section -->
+        <div id="gridSearchParameters" class="results-section" style="display: block;">
+            <h3>
+                Grid Search Parameters
+                <span class="tooltip-icon" title="Entry/Exit: Threshold ranges tested for probability divergence. Fees: Kalshi trading fees included in P&amp;L. Slippage: Price movement cost. Min Trades: Minimum trades required for valid combination. Split: Train/validation/test dataset ratios. Exclude: Seconds excluded from start/end of games.">
+                    ?
+                    <span class="tooltip-content">
+                        <strong>What is this?</strong>
+                        <p style="margin: 0; line-height: 1.6;"><strong>Entry/Exit:</strong> Threshold ranges for probability divergence. <strong>Fees:</strong> Kalshi trading fees in P&amp;L. <strong>Slippage:</strong> Price movement cost. <strong>Min Trades:</strong> Minimum trades for valid combo. <strong>Split:</strong> Train/valid/test ratios. <strong>Exclude:</strong> Seconds excluded from game start/end.</p>
+                    </span>
+                </span>
+            </h3>
+            <p class="section-description" style="color: var(--text-secondary); margin-bottom: 1rem;">
+                All models were tested using the same grid search parameters.
+            </p>
+            <div id="parametersContent" style="margin-top: 1rem;">
+        <div style="background: var(--bg-card); padding: 1rem 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+            <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                <div><span style="color: var(--text-secondary);">Entry:</span> <strong>0.02 - 0.2 (step 0.01)</strong></div>
+                <div><span style="color: var(--text-secondary);">Exit:</span> <strong>0 - 0.05 (step 0.005)</strong></div>
+                <div><span style="color: var(--text-secondary);">Fees:</span> <strong>Yes</strong></div>
+                <div><span style="color: var(--text-secondary);">Slippage:</span> <strong>0</strong></div>
+                <div><span style="color: var(--text-secondary);">Min Trades:</span> <strong>200</strong></div>
+                <div><span style="color: var(--text-secondary);">Split:</span> <strong>0.7/0.15/0.15</strong></div>
+                <div><span style="color: var(--text-secondary);">Exclude:</span> <strong>60s/60s</strong></div>
+            </div>
+        </div>
+    </div>
+        </div>
+
         <!-- Heatmaps Section -->
         <div id="comparisonHeatmaps" class="results-section" style="display: block;">
             <!-- Profit Heatmap Training Set -->
             <div class="heatmap-section" style="margin-bottom: 3rem;">
-                <h3>Profit Heatmaps (Training Set)</h3>
+                <h3>
+                    Profit Heatmaps (Training Set)
+                    <span class="tooltip-icon" title="Heatmap showing net profit ($) for each entry/exit threshold combination on the training set. Darker green = higher profit. Click any heatmap to enlarge.">
+                        ?
+                        <span class="tooltip-content">
+                            <strong>What is this?</strong>
+                            <p>Heatmap showing net profit ($) for each entry/exit threshold combination on the training set. Darker green = higher profit. Click any heatmap to enlarge.</p>
+                        </span>
+                    </span>
+                </h3>
                 <p class="section-description" style="color: var(--text-secondary); margin-bottom: 1rem;">
                     All heatmaps use synchronized color scales for fair comparison. Darker green indicates higher profit.
                 </p>
@@ -11647,7 +11698,16 @@ h5 {
 
             <!-- Profit Heatmap Validation Set -->
             <div class="heatmap-section" style="margin-bottom: 3rem;">
-                <h3>Profit Heatmaps (Validation Set)</h3>
+                <h3>
+                    Profit Heatmaps (Validation Set)
+                    <span class="tooltip-icon" title="Heatmap showing net profit ($) for each entry/exit threshold combination on the validation set. Used to select optimal parameters. Darker green = higher profit. Click any heatmap to enlarge.">
+                        ?
+                        <span class="tooltip-content">
+                            <strong>What is this?</strong>
+                            <p>Heatmap showing net profit ($) for each entry/exit threshold combination on the validation set. Used to select optimal parameters. Darker green = higher profit. Click any heatmap to enlarge.</p>
+                        </span>
+                    </span>
+                </h3>
                 <p class="section-description" style="color: var(--text-secondary); margin-bottom: 1rem;">
                     All heatmaps use synchronized color scales for fair comparison. Darker green indicates higher profit.
                 </p>
@@ -11656,7 +11716,16 @@ h5 {
 
             <!-- Profit Factor Heatmap Validation Set -->
             <div class="heatmap-section" style="margin-bottom: 3rem;">
-                <h3>Profit Factor Heatmaps (Validation Set)</h3>
+                <h3>
+                    Profit Factor Heatmaps (Validation Set)
+                    <span class="tooltip-icon" title="Heatmap showing profit factor (Gross Profits / Gross Losses) for each entry/exit threshold combination on the validation set. &gt;1.0 = profitable. Higher is better. Click any heatmap to enlarge.">
+                        ?
+                        <span class="tooltip-content">
+                            <strong>What is this?</strong>
+                            <p>Heatmap showing profit factor (Gross Profits / Gross Losses) for each entry/exit threshold combination on the validation set. &gt;1.0 = profitable. Higher is better. Click any heatmap to enlarge.</p>
+                        </span>
+                    </span>
+                </h3>
                 <p class="section-description" style="color: var(--text-secondary); margin-bottom: 1rem;">
                     All heatmaps use synchronized color scales for fair comparison. Darker green indicates higher profit factor.
                 </p>
@@ -11664,199 +11733,113 @@ h5 {
             </div>
         </div>
 
-        <!-- Detailed Metrics Section -->
-        <div id="detailedMetrics" class="results-section" style="display: block;">
-            <h3>Detailed Metrics by Model</h3>
-            <div id="detailedMetricsContent" style="margin-top: 1rem;"><div style="display: grid; gap: 1.5rem;">
-            <div class="summary-card" style="background: var(--card-bg); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin: 0 0 1rem 0;">ESPN (default)</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                    <div>
-                        <div class="summary-label">Test Profit</div>
-                        <div class="summary-value">$1942.84</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Trades</div>
-                        <div class="summary-value">332</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Win Rate</div>
-                        <div class="summary-value">72.9%</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Profit Factor</div>
-                        <div class="summary-value">7.62</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Max Drawdown</div>
-                        <div class="summary-value">$43.33</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Entry Threshold</div>
-                        <div class="summary-value">0.190</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Exit Threshold</div>
-                        <div class="summary-value">0.015</div>
-                    </div>
-                </div>
-            </div>
-        
-            <div class="summary-card" style="background: var(--card-bg); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin: 0 0 1rem 0;">catboost_platt</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                    <div>
-                        <div class="summary-label">Test Profit</div>
-                        <div class="summary-value">$1899.70</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Trades</div>
-                        <div class="summary-value">367</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Win Rate</div>
-                        <div class="summary-value">66.8%</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Profit Factor</div>
-                        <div class="summary-value">6.12</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Max Drawdown</div>
-                        <div class="summary-value">$60.17</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Entry Threshold</div>
-                        <div class="summary-value">0.150</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Exit Threshold</div>
-                        <div class="summary-value">0.010</div>
-                    </div>
-                </div>
-            </div>
-        
-            <div class="summary-card" style="background: var(--card-bg); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin: 0 0 1rem 0;">catboost_isotonic</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                    <div>
-                        <div class="summary-label">Test Profit</div>
-                        <div class="summary-value">$1826.54</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Trades</div>
-                        <div class="summary-value">321</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Win Rate</div>
-                        <div class="summary-value">71.0%</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Profit Factor</div>
-                        <div class="summary-value">6.43</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Max Drawdown</div>
-                        <div class="summary-value">$33.45</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Entry Threshold</div>
-                        <div class="summary-value">0.190</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Exit Threshold</div>
-                        <div class="summary-value">0.015</div>
-                    </div>
-                </div>
-            </div>
-        
-            <div class="summary-card" style="background: var(--card-bg); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin: 0 0 1rem 0;">logreg_platt</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                    <div>
-                        <div class="summary-label">Test Profit</div>
-                        <div class="summary-value">$1411.99</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Trades</div>
-                        <div class="summary-value">327</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Win Rate</div>
-                        <div class="summary-value">65.4%</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Profit Factor</div>
-                        <div class="summary-value">3.07</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Max Drawdown</div>
-                        <div class="summary-value">$77.35</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Entry Threshold</div>
-                        <div class="summary-value">0.190</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Exit Threshold</div>
-                        <div class="summary-value">0.015</div>
-                    </div>
-                </div>
-            </div>
-        
-            <div class="summary-card" style="background: var(--card-bg); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin: 0 0 1rem 0;">logreg_isotonic</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-                    <div>
-                        <div class="summary-label">Test Profit</div>
-                        <div class="summary-value">$1220.86</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Trades</div>
-                        <div class="summary-value">331</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Test Win Rate</div>
-                        <div class="summary-value">63.4%</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Profit Factor</div>
-                        <div class="summary-value">2.67</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Max Drawdown</div>
-                        <div class="summary-value">$66.68</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Entry Threshold</div>
-                        <div class="summary-value">0.190</div>
-                    </div>
-                    <div>
-                        <div class="summary-label">Exit Threshold</div>
-                        <div class="summary-value">0.015</div>
-                    </div>
-                </div>
-            </div>
-        </div></div>
-        </div>
-
         <!-- Charts Section -->
         <div id="comparisonCharts" class="results-section" style="display: block;">
-            <h3>Additional Visualizations</h3>
+            <h3>
+                Additional Visualizations
+                <span class="tooltip-icon" title="Marginal Effects: Average profit by threshold value. Tradeoff Scatter: Relationship between trade frequency and profitability.">
+                    ?
+                    <span class="tooltip-content">
+                        <strong>What is this?</strong>
+                        <p><strong>Marginal Effects:</strong> Shows average profit by threshold value, helping identify optimal entry/exit points.</p>
+                        <p><strong>Tradeoff Scatter:</strong> Visualizes the relationship between trade frequency (number of trades) and profitability (net profit).</p>
+                    </span>
+                </span>
+            </h3>
             <div id="chartsGrid" style="display: grid; gap: 2rem; margin-top: 1rem;">
                 <div>
-                    <h4>Marginal Effects (All Models)</h4>
+                    <h4 style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.5rem;">Marginal Effects (All Models)</h4>
                     <div style="position: relative; height: 400px; width: 100%;">
                         <canvas id="marginalEffectsCanvas" height="800" style="display: block; box-sizing: border-box; height: 400px; width: 1000px;" width="2000"></canvas>
                     </div>
                 </div>
                 <div>
-                    <h4>Tradeoff: Trade Frequency vs. Profitability (All Models)</h4>
+                    <h4 style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.5rem;">Tradeoff: Trade Frequency vs. Profitability (All Models)</h4>
                     <div style="position: relative; height: 400px; width: 100%;">
                         <canvas id="tradeoffScatterCanvas" height="800" style="display: block; box-sizing: border-box; height: 400px; width: 1000px;" width="2000"></canvas>
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- Detailed Metrics Section -->
+        <div id="detailedMetrics" class="results-section" style="display: block;">
+            <h3>
+                Detailed Metrics by Model
+                <span class="tooltip-icon" title="Comprehensive performance metrics for each model across train, validation, and test sets. Includes profit, trades, win rate, profit factor, and drawdown metrics.">
+                    ?
+                    <span class="tooltip-content">
+                        <strong>What is this?</strong>
+                        <p>Comprehensive performance metrics for each model across train, validation, and test sets. Includes profit, trades, win rate, profit factor, and drawdown metrics.</p>
+                    </span>
+                </span>
+            </h3>
+            <div id="detailedMetricsContent" style="margin-top: 1rem;"><div style="display: grid; gap: 1.5rem;">
+            <div class="summary-card" style="background: var(--card-bg); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">ESPN (default)</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                    <div><span style="color: var(--text-secondary);">Test Profit:</span> <strong>$1942.84</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Trades:</span> <strong>332</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Win Rate:</span> <strong>72.9%</strong></div>
+                    <div><span style="color: var(--text-secondary);">Profit Factor:</span> <strong>7.62</strong></div>
+                    <div><span style="color: var(--text-secondary);">Max Drawdown:</span> <strong>$43.33</strong></div>
+                    <div><span style="color: var(--text-secondary);">Entry:</span> <strong>0.190</strong></div>
+                    <div><span style="color: var(--text-secondary);">Exit:</span> <strong>0.015</strong></div>
+                </div>
+            </div>
+        
+            <div class="summary-card" style="background: var(--card-bg); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">catboost_platt</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                    <div><span style="color: var(--text-secondary);">Test Profit:</span> <strong>$1899.70</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Trades:</span> <strong>367</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Win Rate:</span> <strong>66.8%</strong></div>
+                    <div><span style="color: var(--text-secondary);">Profit Factor:</span> <strong>6.12</strong></div>
+                    <div><span style="color: var(--text-secondary);">Max Drawdown:</span> <strong>$60.17</strong></div>
+                    <div><span style="color: var(--text-secondary);">Entry:</span> <strong>0.150</strong></div>
+                    <div><span style="color: var(--text-secondary);">Exit:</span> <strong>0.010</strong></div>
+                </div>
+            </div>
+        
+            <div class="summary-card" style="background: var(--card-bg); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">catboost_isotonic</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                    <div><span style="color: var(--text-secondary);">Test Profit:</span> <strong>$1826.54</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Trades:</span> <strong>321</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Win Rate:</span> <strong>71.0%</strong></div>
+                    <div><span style="color: var(--text-secondary);">Profit Factor:</span> <strong>6.43</strong></div>
+                    <div><span style="color: var(--text-secondary);">Max Drawdown:</span> <strong>$33.45</strong></div>
+                    <div><span style="color: var(--text-secondary);">Entry:</span> <strong>0.190</strong></div>
+                    <div><span style="color: var(--text-secondary);">Exit:</span> <strong>0.015</strong></div>
+                </div>
+            </div>
+        
+            <div class="summary-card" style="background: var(--card-bg); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">logreg_platt</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                    <div><span style="color: var(--text-secondary);">Test Profit:</span> <strong>$1411.99</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Trades:</span> <strong>327</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Win Rate:</span> <strong>65.4%</strong></div>
+                    <div><span style="color: var(--text-secondary);">Profit Factor:</span> <strong>3.07</strong></div>
+                    <div><span style="color: var(--text-secondary);">Max Drawdown:</span> <strong>$77.35</strong></div>
+                    <div><span style="color: var(--text-secondary);">Entry:</span> <strong>0.190</strong></div>
+                    <div><span style="color: var(--text-secondary);">Exit:</span> <strong>0.015</strong></div>
+                </div>
+            </div>
+        
+            <div class="summary-card" style="background: var(--card-bg); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">logreg_isotonic</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
+                    <div><span style="color: var(--text-secondary);">Test Profit:</span> <strong>$1220.86</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Trades:</span> <strong>331</strong></div>
+                    <div><span style="color: var(--text-secondary);">Test Win Rate:</span> <strong>63.4%</strong></div>
+                    <div><span style="color: var(--text-secondary);">Profit Factor:</span> <strong>2.67</strong></div>
+                    <div><span style="color: var(--text-secondary);">Max Drawdown:</span> <strong>$66.68</strong></div>
+                    <div><span style="color: var(--text-secondary);">Entry:</span> <strong>0.190</strong></div>
+                    <div><span style="color: var(--text-secondary);">Exit:</span> <strong>0.015</strong></div>
+                </div>
+            </div>
+        </div></div>
         </div>
     </div>
 <div id="heatmapModal" class="heatmap-modal">
