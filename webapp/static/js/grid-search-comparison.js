@@ -1412,4 +1412,3 @@ function closeHeatmapModal() {
         modal.style.display = 'none';
     }
 }
-
