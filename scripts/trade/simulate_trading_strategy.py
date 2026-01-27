@@ -89,7 +89,6 @@ def get_aligned_data(
     game_id: str,
     exclude_first_seconds: int = 0,
     exclude_last_seconds: int = 0,
-    use_trade_data: bool = False,
     model_artifact: Optional[WinProbArtifact] = None,
     model_name: Optional[str] = None
 ) -> tuple[list[dict[str, Any]], Optional[int], Optional[int], Optional[int]]:
@@ -120,7 +119,6 @@ def get_aligned_data(
         game_id: ESPN game_id
         exclude_first_seconds: Exclude first N seconds of game
         exclude_last_seconds: Exclude last N seconds of game
-        use_trade_data: **DEPRECATED** - Canonical dataset uses candlestick data. This parameter is ignored.
         model_artifact: Optional WinProbArtifact for model-based probability generation. If None, uses ESPN probabilities.
         model_name: Optional model name ('logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic'). 
                     If provided, will query pre-computed probabilities from derived.model_probabilities_v1 first.
@@ -134,9 +132,6 @@ def get_aligned_data(
     """
     import time
     start_time = time.time()
-    
-    if use_trade_data:
-        logger.warning(f"[ALIGN_DATA] Game {game_id}: use_trade_data=True is deprecated. Canonical dataset uses candlestick data.")
     
     # Get game start time and outcome from scoreboard_games
     game_info_sql = """
@@ -223,6 +218,23 @@ def get_aligned_data(
             "logreg_isotonic": "mp.logreg_isotonic_prob",
             "catboost_platt": "mp.catboost_platt_prob",
             "catboost_isotonic": "mp.catboost_isotonic_prob",
+            "catboost_baseline_platt": "mp.catboost_baseline_platt_prob",
+            "catboost_baseline_isotonic": "mp.catboost_baseline_isotonic_prob",
+            "catboost_odds_platt": "mp.catboost_odds_platt_prob",
+            "catboost_odds_isotonic": "mp.catboost_odds_isotonic_prob",
+            "catboost_baseline_no_interaction_platt": "mp.catboost_baseline_no_interaction_platt_prob",
+            "catboost_baseline_no_interaction_isotonic": "mp.catboost_baseline_no_interaction_isotonic_prob",
+            "catboost_odds_no_interaction_platt": "mp.catboost_odds_no_interaction_platt_prob",
+            "catboost_odds_no_interaction_isotonic": "mp.catboost_odds_no_interaction_isotonic_prob",
+            # v2 models (with updated feature set and uses_opening_odds_baseline flag)
+            "catboost_baseline_platt_v2": "mp.catboost_baseline_platt_v2_prob",
+            "catboost_baseline_isotonic_v2": "mp.catboost_baseline_isotonic_v2_prob",
+            "catboost_odds_platt_v2": "mp.catboost_odds_platt_v2_prob",
+            "catboost_odds_isotonic_v2": "mp.catboost_odds_isotonic_v2_prob",
+            "catboost_baseline_no_interaction_platt_v2": "mp.catboost_baseline_no_interaction_platt_v2_prob",
+            "catboost_baseline_no_interaction_isotonic_v2": "mp.catboost_baseline_no_interaction_isotonic_v2_prob",
+            "catboost_odds_no_interaction_platt_v2": "mp.catboost_odds_no_interaction_platt_v2_prob",
+            "catboost_odds_no_interaction_isotonic_v2": "mp.catboost_odds_no_interaction_isotonic_v2_prob",
         }
         if model_name in model_prob_map:
             model_prob_column = model_prob_map[model_name]
@@ -231,6 +243,8 @@ def get_aligned_data(
             base_columns.append(model_prob_column)
     
     # Add model features if model is provided (needed for fallback on-the-fly scoring)
+    # Track if model needs opening odds (for baseline or features)
+    needs_opening_odds = False
     if model_artifact is not None:
         base_columns.append("sf.score_diff")  # Required for point_differential
         # Add interaction terms if model uses them
@@ -242,6 +256,25 @@ def get_aligned_data(
             base_columns.append("sf.espn_home_prob_delta_1")
         if any("period" in fn for fn in model_artifact.feature_names):
             base_columns.append("sf.period")
+        
+        # Check if model needs opening odds (for baseline or features)
+        has_opening_odds_features = "opening_overround" in model_artifact.feature_names
+        uses_baseline = getattr(model_artifact, 'uses_opening_odds_baseline', None)
+        if uses_baseline is None:
+            # Fallback heuristic for older artifacts
+            has_opening_odds_features_check = any("opening" in fn.lower() or "overround" in fn.lower() 
+                                                 for fn in model_artifact.feature_names)
+            opening_prob_not_a_feature = "opening_prob_home_fair" not in model_artifact.feature_names
+            uses_baseline = has_opening_odds_features_check and opening_prob_not_a_feature
+        
+        if has_opening_odds_features or uses_baseline:
+            needs_opening_odds = True
+            base_columns.extend([
+                "sf.opening_moneyline_home",
+                "sf.opening_moneyline_away",
+                "sf.opening_spread",
+                "sf.opening_total"
+            ])
     
     # Build SQL query - join with pre-computed probabilities if model_name provided
     if model_name and model_prob_column:
@@ -404,6 +437,11 @@ def get_aligned_data(
             # Sanity guard: Future-proofing check for canonical dataset format changes
             # Current behavior: away is already in home-space, so home ≈ away (not complementary)
             # If canonical dataset switches to raw away-space, home + away would sum to ~1.0
+            # 
+            # IMPORTANT: When markets are balanced (~50/50), home + away ≈ 1.0 even when both are
+            # correctly converted (both ~0.5). We only warn if sum ≈ 1.0 AND home ≠ away (clear
+            # indication of non-conversion), not when home ≈ away (which can also sum to ~1.0 when balanced).
+            # 
             # Normalize values first (handle 0-100 format) and convert to float to avoid Decimal/float mixing
             home_norm_val = float(kalshi_home_mid_price)
             away_norm_val = float(kalshi_away_mid_price)
@@ -415,14 +453,17 @@ def get_aligned_data(
             
             if diff_check < 0.05:
                 # Current expected behavior: away is already converted, so home ≈ away
-                pass  # This is correct, no warning needed
-            elif sum_check < 0.05:
-                # WARNING: This suggests canonical dataset switched to raw away-space
-                logger.warning(f"[ALIGN_DATA] Game {game_id}: WARNING - home + away prices sum to ~1.0 (diff: {sum_check:.4f}). "
+                # This is correct, no warning needed (even if sum ≈ 1.0 due to balanced markets)
+                pass
+            elif sum_check < 0.05 and diff_check > 0.10:
+                # WARNING: home + away ≈ 1.0 AND they're NOT close (diff > 0.10)
+                # This suggests canonical dataset switched to raw away-space (away not converted)
+                logger.warning(f"[ALIGN_DATA] Game {game_id}: WARNING - home + away prices sum to ~1.0 (sum_diff: {sum_check:.4f}) "
+                             f"but home ≠ away (diff: {diff_check:.4f}). "
                              f"This suggests canonical dataset may have switched to raw away-space. "
                              f"home={home_norm:.4f}, away={away_norm:.4f}. "
                              f"Python code should convert away→home if this becomes the norm.")
-            # Else: large difference and don't sum to 1 - shrug, might be data quality issue
+            # Else: large difference and don't sum to 1 - might be data quality issue, but not conversion issue
         elif kalshi_home_mid_price is not None:
             kalshi_price = kalshi_home_mid_price
             kalshi_bid = kalshi_home_bid
@@ -534,6 +575,22 @@ def get_aligned_data(
                     period_val = row[row_idx] if len(row) > row_idx else None
                     row_idx += 1
                 
+                # Extract opening odds if model needs them
+                opening_moneyline_home = None
+                opening_moneyline_away = None
+                opening_spread = None
+                opening_total = None
+                
+                if needs_opening_odds:
+                    opening_moneyline_home = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                    opening_moneyline_away = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                    opening_spread = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                    opening_total = row[row_idx] if len(row) > row_idx else None
+                    row_idx += 1
+                
                 # Validate required features
                 if score_diff is None or time_remaining is None:
                     logger.warning(f"[ALIGN_DATA] Game {game_id}: Missing required model features (score_diff or time_remaining), using ESPN prob")
@@ -585,18 +642,59 @@ def get_aligned_data(
                             # Model expects period but value is missing - default to 1 (first period)
                             period_arr = [1]
                     
+                    # Compute opening odds features and baseline if model needs them
+                    opening_overround_arr = None
+                    opening_prob_home_fair_arr = None
+                    
+                    if needs_opening_odds:
+                        from scripts.lib._winprob_lib import compute_opening_odds_features
+                        
+                        odds_features = compute_opening_odds_features(
+                            opening_moneyline_home=np.array([opening_moneyline_home]) if opening_moneyline_home is not None else None,
+                            opening_moneyline_away=np.array([opening_moneyline_away]) if opening_moneyline_away is not None else None,
+                            opening_spread=np.array([opening_spread]) if opening_spread is not None else None,
+                            opening_total=np.array([opening_total]) if opening_total is not None else None,
+                        )
+                        
+                        # Check if model uses opening odds features
+                        has_opening_odds_features = "opening_overround" in model_artifact.feature_names
+                        # Check if model uses baseline
+                        uses_baseline = getattr(model_artifact, 'uses_opening_odds_baseline', None)
+                        if uses_baseline is None:
+                            has_opening_odds_features_check = any("opening" in fn.lower() or "overround" in fn.lower() 
+                                                                 for fn in model_artifact.feature_names)
+                            opening_prob_not_a_feature = "opening_prob_home_fair" not in model_artifact.feature_names
+                            uses_baseline = has_opening_odds_features_check and opening_prob_not_a_feature
+                        
+                        # For features (if model uses opening odds features)
+                        if has_opening_odds_features:
+                            opening_overround_arr = np.array([odds_features["opening_overround"]])
+                        
+                        # For baseline (if model uses baseline)
+                        if uses_baseline:
+                            opening_prob_home_fair_arr = np.array([odds_features["opening_prob_home_fair"]])
+                    
                     # Build design matrix
-                    X = build_design_matrix(
-                        point_differential=point_differential,
-                        time_remaining_regulation=time_remaining_regulation,
-                        possession=possession,
-                        preprocess=model_artifact.preprocess,
-                        score_diff_div_sqrt_time_remaining=score_diff_div_sqrt_arr,
-                        espn_home_prob=espn_prob_arr,
-                        espn_home_prob_lag_1=espn_prob_lag_1_arr,
-                        espn_home_prob_delta_1=espn_prob_delta_1_arr,
-                        period=period_arr
-                    )
+                    build_matrix_kwargs = {
+                        "point_differential": point_differential,
+                        "time_remaining_regulation": time_remaining_regulation,
+                        "possession": possession,
+                        "preprocess": model_artifact.preprocess,
+                        "score_diff_div_sqrt_time_remaining": score_diff_div_sqrt_arr,
+                        "espn_home_prob": espn_prob_arr,
+                        "espn_home_prob_lag_1": espn_prob_lag_1_arr,
+                        "espn_home_prob_delta_1": espn_prob_delta_1_arr,
+                        "period": period_arr,
+                    }
+                    
+                    # Add opening odds features if model uses them
+                    if needs_opening_odds:
+                        has_opening_odds_features = "opening_overround" in model_artifact.feature_names
+                        if has_opening_odds_features:
+                            build_matrix_kwargs["opening_overround"] = opening_overround_arr
+                            build_matrix_kwargs["odds_nan_policy"] = "keep"
+                    
+                    X = build_design_matrix(**build_matrix_kwargs)
                     
                     # Validate design matrix shape matches model expectations BEFORE prediction
                     expected_features = len(model_artifact.feature_names)
@@ -610,9 +708,13 @@ def get_aligned_data(
                         )
                         final_prob = float(espn_home_prob)
                     else:
-                        # Predict probability
+                        # Predict probability - pass baseline if model uses it
                         try:
-                            prob_array = predict_proba(model_artifact, X=X)
+                            prob_array = predict_proba(
+                                model_artifact, 
+                                X=X,
+                                opening_prob_home_fair=opening_prob_home_fair_arr,
+                            )
                             final_prob = float(prob_array[0])
                         except Exception as pred_error:
                             logger.warning(
@@ -659,7 +761,7 @@ def get_aligned_data(
     aligned_data.sort(key=lambda p: p["timestamp"])
     
     elapsed = time.time() - start_time
-    # logger.info(f"[TIMING] get_aligned_data({game_id}) - TOTAL: {elapsed:.3f}s - aligned_points={len(aligned_data)}, use_trade_data={use_trade_data} (deprecated)")
+    # logger.info(f"[TIMING] get_aligned_data({game_id}) - TOTAL: {elapsed:.3f}s - aligned_points={len(aligned_data)}")
     return aligned_data, game_start_timestamp, duration_seconds, actual_outcome
 
 

@@ -59,7 +59,7 @@ def get_simulation_results(
     bet_amount: float = Query(20.0, description="Bet amount in dollars per trade (default: 20.0)"),
     slippage_rate: float = Query(0.0, description="Optional slippage rate as decimal (e.g., 0.001 = 0.1%). Default: 0.0 (disabled). This is a conservative assumption, not a precise model."),
     min_hold_seconds: int = Query(30, description="Minimum holding period in seconds before allowing exit (default: 30). Prevents noise trading."),
-    use_trade_data: bool = Query(True, description="Use trade-derived second-by-second data instead of 1-minute candlesticks. More precise timing but no bid/ask data (uses execution prices with slippage estimate). Default: True for better granularity."),
+    use_trade_data: bool = Query(False, description="DEPRECATED: Ignored. Canonical dataset uses candlestick data."),
     enable_fees: bool = Query(False, description="Enable Kalshi trading fees (7% formula). Default: False (fees disabled)."),
 ) -> dict[str, Any]:
     """
@@ -86,8 +86,7 @@ def get_simulation_results(
                 conn,
                 game_id,
                 exclude_first_seconds=exclude_first_seconds,
-                exclude_last_seconds=exclude_last_seconds,
-                use_trade_data=use_trade_data
+                exclude_last_seconds=exclude_last_seconds
             )
             align_elapsed = time.time() - align_start
             logger.info(f"[TIMING] get_simulation_results({game_id}) - get_aligned_data: {align_elapsed:.3f}s")
@@ -122,8 +121,7 @@ def get_simulation_results(
             results["exclude_first_seconds"] = exclude_first_seconds
             results["exclude_last_seconds"] = exclude_last_seconds
             results["num_data_points"] = len(aligned_data)
-            results["use_trade_data"] = use_trade_data
-            results["data_source"] = "trade-derived" if use_trade_data else "official-candlesticks"
+            results["data_source"] = "official-candlesticks"
             results["actual_outcome"] = "home_won" if actual_outcome == 1 else "away_won" if actual_outcome == 0 else "unknown"
             
             total_elapsed = time.time() - endpoint_start
@@ -148,7 +146,7 @@ def get_bulk_simulation_results(
     bet_amount: float = Query(20.0, description="Bet amount in dollars per trade (default: 20.0)"),
     slippage_rate: float = Query(0.0, description="Optional slippage rate as decimal (e.g., 0.001 = 0.1%). Default: 0.0 (disabled). This is a conservative assumption, not a precise model."),
     min_hold_seconds: int = Query(30, description="Minimum holding period in seconds before allowing exit (default: 30). Prevents noise trading."),
-    use_trade_data: bool = Query(True, description="Use trade-derived second-by-second data instead of 1-minute candlesticks. More precise timing but no bid/ask data (uses execution prices with slippage estimate). Default: True for better granularity."),
+    use_trade_data: bool = Query(False, description="DEPRECATED: Ignored. Canonical dataset uses candlestick data."),
     enable_fees: bool = Query(False, description="Enable Kalshi trading fees (7% formula). Default: False (fees disabled)."),
     request_id: Optional[str] = Query(None, description="Request ID for progress tracking"),
 ) -> dict[str, Any]:
@@ -264,7 +262,7 @@ def get_bulk_simulation_results(
             return row and row[0] is not None and row[1] is not None
         
         def _generate_cache_key(game_id: str, entry_threshold: float, exit_threshold: float, 
-                                bet_amount: float, exclude_first: int, exclude_last: int, slippage_rate: float, min_hold_seconds: int = 30, use_trade_data: bool = True, enable_fees: bool = False) -> str:
+                                bet_amount: float, exclude_first: int, exclude_last: int, slippage_rate: float, min_hold_seconds: int = 30, enable_fees: bool = False) -> str:
             """Generate a cache key for simulation results."""
             # Cache version: Increment when simulation logic changes (invalidates old cached results)
             # Version 4: Added enable_fees to cache key to separate fee-enabled vs fee-disabled results
@@ -280,7 +278,6 @@ def get_bulk_simulation_results(
                 "exclude_last_seconds": exclude_last,
                 "slippage_rate": slippage_rate,
                 "min_hold_seconds": min_hold_seconds,  # Include min_hold_seconds in cache key
-                "use_trade_data": use_trade_data,  # Include use_trade_data to separate trade vs candlestick results
                 "enable_fees": enable_fees  # Include enable_fees to separate fee-enabled vs fee-disabled results
             }
             # Use JSON to ensure consistent ordering, then hash for shorter key
@@ -310,7 +307,7 @@ def get_bulk_simulation_results(
                     # Generate cache key
                     cache_key = _generate_cache_key(
                         game_id, entry_threshold, exit_threshold, 
-                        bet_amount, exclude_first_seconds, exclude_last_seconds, slippage_rate, min_hold_seconds, use_trade_data, enable_fees
+                        bet_amount, exclude_first_seconds, exclude_last_seconds, slippage_rate, min_hold_seconds, enable_fees
                     )
                     
                     # Check cache for completed games
@@ -338,8 +335,7 @@ def get_bulk_simulation_results(
                         conn,
                         game_id,
                         exclude_first_seconds=exclude_first_seconds,
-                        exclude_last_seconds=exclude_last_seconds,
-                        use_trade_data=use_trade_data
+                        exclude_last_seconds=exclude_last_seconds
                     )
                     
                     if not aligned_data:
@@ -747,8 +743,7 @@ def get_bulk_simulation_results(
             "exclude_first_seconds": exclude_first_seconds,
             "exclude_last_seconds": exclude_last_seconds,
             "bet_amount_dollars": bet_amount,
-            "use_trade_data": use_trade_data,
-            "data_source": "trade-derived" if use_trade_data else "official-candlesticks",
+            "data_source": "official-candlesticks",
             "game_results": game_results,
             "trades": all_trades,
             # New metrics

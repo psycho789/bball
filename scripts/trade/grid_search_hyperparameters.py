@@ -122,18 +122,24 @@ class GridSearchConfig:
     test_ratio: float
     top_n: int
     bet_amount: float = 20.0
-    use_trade_data: bool = True
     exclude_first_seconds: int = 60
     exclude_last_seconds: int = 60
     model_name: Optional[str] = None  # Model name: 'logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic', or None for ESPN
 
 
-def load_model_artifact(model_name: Optional[str]) -> Optional[WinProbArtifact]:
+def load_model_artifact(model_name: Optional[str], verbose: bool = False) -> Optional[WinProbArtifact]:
     """
     Load model artifact by name. Returns None if model_name is None.
     
     Args:
-        model_name: Model name ('logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic') or None
+        model_name: Model name (one of: 'logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic',
+                   'catboost_baseline_platt', 'catboost_baseline_isotonic', 'catboost_odds_platt', 'catboost_odds_isotonic',
+                   'catboost_baseline_no_interaction_platt', 'catboost_baseline_no_interaction_isotonic',
+                   'catboost_odds_no_interaction_platt', 'catboost_odds_no_interaction_isotonic',
+                   'catboost_baseline_platt_v2', 'catboost_baseline_isotonic_v2', 'catboost_odds_platt_v2', 'catboost_odds_isotonic_v2',
+                   'catboost_baseline_no_interaction_platt_v2', 'catboost_baseline_no_interaction_isotonic_v2',
+                   'catboost_odds_no_interaction_platt_v2', 'catboost_odds_no_interaction_isotonic_v2') or None
+        verbose: Whether to log model loading timing
     
     Returns:
         WinProbArtifact object or None if model_name is None
@@ -145,11 +151,32 @@ def load_model_artifact(model_name: Optional[str]) -> Optional[WinProbArtifact]:
     if model_name is None:
         return None
     
+    load_start = time.time()
+    
     model_file_map = {
-        "logreg_platt": "data/models/winprob_logreg_platt_2017-2023.json",
-        "logreg_isotonic": "data/models/winprob_logreg_isotonic_2017-2023.json",
-        "catboost_platt": "data/models/winprob_catboost_platt_2017-2023.json",
-        "catboost_isotonic": "data/models/winprob_catboost_isotonic_2017-2023.json",
+        # "logreg_platt": "data/models/winprob_logreg_platt_2017-2023.json",
+        # "logreg_isotonic": "data/models/winprob_logreg_isotonic_2017-2023.json",
+        # "catboost_platt": "data/models/winprob_catboost_platt_2017-2023.json",
+        # "catboost_isotonic": "data/models/winprob_catboost_isotonic_2017-2023.json",
+        # Pre-game odds integration models (baseline and odds, each with platt and isotonic calibration) - v1 (moved to v1/)
+        "catboost_baseline_platt": "artifacts/v1/winprob_catboost_baseline_platt.json",
+        "catboost_baseline_isotonic": "artifacts/v1/winprob_catboost_baseline_isotonic.json",
+        "catboost_odds_platt": "artifacts/v1/winprob_catboost_odds_platt.json",
+        "catboost_odds_isotonic": "artifacts/v1/winprob_catboost_odds_isotonic.json",
+        # No-interaction models (baseline and odds, each with platt and isotonic calibration) - v1 (moved to v1/)
+        "catboost_baseline_no_interaction_platt": "artifacts/v1/winprob_catboost_baseline_no_interaction_platt.json",
+        "catboost_baseline_no_interaction_isotonic": "artifacts/v1/winprob_catboost_baseline_no_interaction_isotonic.json",
+        "catboost_odds_no_interaction_platt": "artifacts/v1/winprob_catboost_odds_no_interaction_platt.json",
+        "catboost_odds_no_interaction_isotonic": "artifacts/v1/winprob_catboost_odds_no_interaction_isotonic.json",
+        # v2 models (with updated feature set and uses_opening_odds_baseline flag)
+        "catboost_baseline_platt_v2": "artifacts/winprob_catboost_baseline_platt_v2.json",
+        "catboost_baseline_isotonic_v2": "artifacts/winprob_catboost_baseline_isotonic_v2.json",
+        "catboost_odds_platt_v2": "artifacts/winprob_catboost_odds_platt_v2.json",
+        "catboost_odds_isotonic_v2": "artifacts/winprob_catboost_odds_isotonic_v2.json",
+        "catboost_baseline_no_interaction_platt_v2": "artifacts/winprob_catboost_baseline_no_interaction_platt_v2.json",
+        "catboost_baseline_no_interaction_isotonic_v2": "artifacts/winprob_catboost_baseline_no_interaction_isotonic_v2.json",
+        "catboost_odds_no_interaction_platt_v2": "artifacts/winprob_catboost_odds_no_interaction_platt_v2.json",
+        "catboost_odds_no_interaction_isotonic_v2": "artifacts/winprob_catboost_odds_no_interaction_isotonic_v2.json",
     }
     
     if model_name not in model_file_map:
@@ -159,7 +186,26 @@ def load_model_artifact(model_name: Optional[str]) -> Optional[WinProbArtifact]:
     if not model_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
-    return load_artifact(model_path)
+    artifact = load_artifact(model_path)
+    load_elapsed = time.time() - load_start
+    
+    if verbose:
+        logger.debug(f"[MODEL] Loaded {model_name} in {load_elapsed:.2f}s from {model_path}")
+    
+    # Model validation warnings
+    if artifact:
+        # Check if model file is very old (possible stale model)
+        model_age_days = (time.time() - model_path.stat().st_mtime) / 86400
+        if model_age_days > 90:
+            logger.warning(f"[MODEL] Model file is old: {model_age_days:.0f} days. "
+                           f"Consider retraining: {model_path}")
+        
+        # Validate artifact structure (if possible)
+        if hasattr(artifact, 'model') and artifact.model is None:
+            logger.warning(f"[MODEL] Model artifact loaded but model object is None. "
+                           f"This may indicate a corrupted model file.")
+    
+    return artifact
 
 
 def generate_grid(config: GridSearchConfig) -> list[tuple[float, float]]:
@@ -202,6 +248,22 @@ def generate_grid(config: GridSearchConfig) -> list[tuple[float, float]]:
                 combinations.append((entry_threshold, exit_threshold))
     
     logger.debug(f"Generated {len(combinations)} valid combinations from {len(entry_values)} entry values and {len(exit_values)} exit values")
+    
+    # Validation warnings
+    if len(combinations) == 0:
+        logger.warning(f"[GRID] No valid combinations generated! "
+                       f"Entry range: [{config.entry_min}, {config.entry_max}], "
+                       f"Exit range: [{config.exit_min}, {config.exit_max}]. "
+                       f"Check that exit < entry constraint is satisfied.")
+    elif len(combinations) < 10:
+        logger.warning(f"[GRID] Very few combinations generated: {len(combinations)}. "
+                       f"This may indicate grid parameters are too restrictive.")
+    
+    # Warn if entry/exit ranges seem inverted
+    if config.entry_max <= config.exit_min:
+        logger.warning(f"[GRID] Entry max ({config.entry_max}) <= Exit min ({config.exit_min}). "
+                       f"No valid combinations possible (exit must be < entry).")
+    
     return combinations
 
 
@@ -222,7 +284,7 @@ def get_game_ids_from_season(conn: psycopg.Connection, season: str) -> list[str]
         FROM kalshi.markets km
         WHERE km.espn_event_id IS NOT NULL
     )
-    SELECT DISTINCT p.game_id
+    SELECT p.game_id
     FROM espn.probabilities_raw_items p
     JOIN kalshi_games kg ON kg.espn_event_id = p.game_id
     WHERE p.season_label = %s
@@ -272,8 +334,8 @@ def split_games(game_ids: list[str], config: GridSearchConfig) -> tuple[list[str
     Returns:
         Tuple of (train_games, valid_games, test_games)
     """
-    # Sort for deterministic order
-    sorted_game_ids = sorted(set(game_ids))
+    # Sort for deterministic order (game_ids already unique from database query)
+    sorted_game_ids = sorted(game_ids)
     
     # Shuffle with seed for reproducibility
     rng = random.Random(config.seed)
@@ -291,6 +353,33 @@ def split_games(game_ids: list[str], config: GridSearchConfig) -> tuple[list[str
     
     logger.debug(f"Split {total} games: train={len(train_games)}, valid={len(valid_games)}, test={len(test_games)}")
     
+    # Validation warnings
+    if total > 0:
+        train_pct = len(train_games) / total * 100
+        valid_pct = len(valid_games) / total * 100
+        test_pct = len(test_games) / total * 100
+        
+        # Warn if splits are too small
+        min_split_size = 10
+        if len(train_games) < min_split_size:
+            logger.warning(f"[SPLIT] Train split is very small: {len(train_games)} games ({train_pct:.1f}%). "
+                           f"Results may be unreliable. Minimum recommended: {min_split_size}")
+        
+        if len(valid_games) < min_split_size:
+            logger.warning(f"[SPLIT] Validation split is very small: {len(valid_games)} games ({valid_pct:.1f}%). "
+                           f"Selection may be unreliable. Minimum recommended: {min_split_size}")
+        
+        if len(test_games) < min_split_size:
+            logger.warning(f"[SPLIT] Test split is very small: {len(test_games)} games ({test_pct:.1f}%). "
+                           f"Final evaluation may be unreliable. Minimum recommended: {min_split_size}")
+        
+        # Warn if splits are very unbalanced
+        expected_train_pct = config.train_ratio * 100
+        if abs(train_pct - expected_train_pct) > 5.0:
+            logger.warning(f"[SPLIT] Train split differs significantly from expected: "
+                           f"{train_pct:.1f}% actual vs {expected_train_pct:.1f}% expected. "
+                           f"This may indicate rounding issues with small game counts.")
+    
     return train_games, valid_games, test_games
 
 
@@ -302,7 +391,8 @@ def run_simulation_for_games(
     config: GridSearchConfig,
     model_artifact: Optional[WinProbArtifact] = None,
     progress: Optional[Any] = None,
-    task_id: Optional[int] = None
+    task_id: Optional[int] = None,
+    verbose: bool = False
 ) -> dict[str, Any]:
     """
     Run simulation for a list of games and aggregate metrics.
@@ -313,6 +403,7 @@ def run_simulation_for_games(
         entry_threshold: Entry threshold
         exit_threshold: Exit threshold
         config: Grid search configuration
+        verbose: Whether to log detailed per-game metrics
     
     Returns:
         Dictionary with aggregated metrics
@@ -323,8 +414,17 @@ def run_simulation_for_games(
     total_fees_cents = 0.0
     total_hold_time_seconds = 0.0
     
+    # Data quality tracking
+    games_processed = 0
+    games_skipped = 0
+    total_data_points = 0
+    game_times = []
+    
+    split_start_time = time.time()
+    
     # Suppress verbose logging during batch processing (already done at higher level)
     for game_id in game_ids:
+        game_start_time = time.time()
         try:
             # Update progress to show current game
             if progress is not None and task_id is not None:
@@ -336,17 +436,20 @@ def run_simulation_for_games(
                 game_id,
                 exclude_first_seconds=config.exclude_first_seconds,
                 exclude_last_seconds=config.exclude_last_seconds,
-                use_trade_data=config.use_trade_data,
                 model_artifact=model_artifact,
                 model_name=config.model_name
             )
             
             if not aligned_data:
+                games_skipped += 1
                 logger.debug(f"Skipping game {game_id}: no aligned data")
                 # Still advance progress even if skipped
                 if progress is not None and task_id is not None:
                     progress.advance(task_id, 1)
                 continue
+            
+            games_processed += 1
+            total_data_points += len(aligned_data)
             
             # Run simulation
             results = simulate_trading_strategy(
@@ -363,6 +466,7 @@ def run_simulation_for_games(
             )
             
             # Aggregate metrics
+            num_trades = len(results.get('trades', []))
             all_trades.extend(results.get('trades', []))
             total_net_profit_cents += results.get('total_profit_cents', 0.0)
             total_gross_profit_cents += results.get('total_gross_profit_cents', 0.0)
@@ -380,16 +484,42 @@ def run_simulation_for_games(
                 if entry_time and exit_time:
                     total_hold_time_seconds += (exit_time - entry_time)
             
+            # Log per-game metrics in verbose mode
+            game_elapsed = time.time() - game_start_time
+            game_times.append(game_elapsed)
+            if verbose:
+                profit_dollars = results.get('total_profit_cents', 0.0) / 100.0
+                # Use INFO level in verbose mode so logs are visible above progress bar
+                logger.info(f"[PERF] Game {game_id[:8]}: {game_elapsed:.2f}s, {len(aligned_data)} points, "
+                           f"{num_trades} trades, profit=${profit_dollars:.2f}")
+            
             # Update progress bar after each game
             if progress is not None and task_id is not None:
                 progress.advance(task_id, 1)
         
         except Exception as e:
+            games_skipped += 1
             logger.warning(f"Error processing game {game_id}: {e}")
             # Still advance progress even on error
             if progress is not None and task_id is not None:
                 progress.advance(task_id, 1)
             continue
+    
+    # Log split summary
+    split_elapsed = time.time() - split_start_time
+    avg_game_time = sum(game_times) / len(game_times) if game_times else 0.0
+    logger.debug(f"[PERF] Split processing: {len(game_ids)} games ({games_processed} processed, {games_skipped} skipped), "
+                 f"{total_data_points} data points, avg {avg_game_time:.2f}s/game, total {split_elapsed:.2f}s")
+    
+    # Performance warnings
+    if game_times:
+        max_game_time = max(game_times)
+        if avg_game_time > 5.0:  # 5 seconds per game is slow
+            logger.warning(f"[PERF] Slow average game processing: {avg_game_time:.2f}s/game. "
+                           f"This may indicate database or model performance issues.")
+        if max_game_time > 10.0:
+            logger.warning(f"[PERF] Some games took very long to process: max={max_game_time:.2f}s. "
+                           f"This may indicate database query issues.")
     
     # Calculate aggregated metrics
     num_trades = len(all_trades)
@@ -429,6 +559,37 @@ def run_simulation_for_games(
     # Check if valid (meets min_trade_count)
     is_valid = num_trades >= config.min_trade_count
     
+    # Result validation warnings
+    if num_trades == 0:
+        logger.warning(f"[RESULTS] No trades executed for entry={entry_threshold:.3f}, exit={exit_threshold:.3f}. "
+                       f"Processed {games_processed} games with {total_data_points} data points. "
+                       f"This may indicate thresholds are too restrictive.")
+    elif num_trades > 0:
+        # Warn if all profits are zero (suspicious)
+        if abs(net_profit_dollars) < 0.01:
+            logger.warning(f"[RESULTS] All trades resulted in near-zero profit: ${net_profit_dollars:.2f} "
+                           f"({num_trades} trades). This may indicate a calculation issue.")
+        
+        # Warn if profit is extremely high (possible calculation error)
+        if abs(net_profit_dollars) > 10000:
+            logger.warning(f"[RESULTS] Extremely high profit detected: ${net_profit_dollars:.2f} "
+                           f"({num_trades} trades). Please verify calculation is correct.")
+        
+        # Warn if win rate is suspicious
+        if num_trades > 10:
+            if win_rate > 0.95:
+                logger.warning(f"[RESULTS] Suspiciously high win rate: {win_rate:.1%} ({len(winning_trades)}/{num_trades}). "
+                               f"This may indicate a calculation issue.")
+            elif win_rate < 0.05:
+                logger.warning(f"[RESULTS] Suspiciously low win rate: {win_rate:.1%} ({len(winning_trades)}/{num_trades}). "
+                               f"This may indicate a calculation issue.")
+        
+        # Warn if profit factor is extreme
+        if profit_factor > 100:
+            logger.warning(f"[RESULTS] Extremely high profit factor: {profit_factor:.2f}. "
+                           f"This may indicate a calculation issue.")
+    
+    # Add data quality metrics
     return {
         'entry_threshold': entry_threshold,
         'exit_threshold': exit_threshold,
@@ -440,7 +601,11 @@ def run_simulation_for_games(
         'max_drawdown': max_drawdown,
         'total_fees': total_fees_dollars,
         'avg_hold_time': avg_hold_time,
-        'is_valid': is_valid
+        'is_valid': is_valid,
+        # Data quality metrics
+        'games_processed': games_processed,
+        'games_skipped': games_skipped,
+        'total_data_points': total_data_points
     }
 
 
@@ -449,8 +614,10 @@ def process_combination(
     game_splits: dict[str, list[str]],
     config: GridSearchConfig,
     dsn: str,
+    model_artifact: Optional[WinProbArtifact] = None,
     progress: Optional[Any] = None,
-    task_id: Optional[int] = None
+    task_id: Optional[int] = None,
+    verbose: bool = False
 ) -> dict[str, Any]:
     """
     Process a single parameter combination across all splits.
@@ -460,23 +627,28 @@ def process_combination(
         game_splits: Dictionary with 'train', 'valid', 'test' keys containing game ID lists
         config: Grid search configuration
         dsn: Database connection string
+        model_artifact: Pre-loaded model artifact (loaded once before ThreadPoolExecutor)
+        progress: Rich Progress object for progress tracking
+        task_id: Progress task ID
+        verbose: Whether to log detailed metrics
     
     Returns:
         Dictionary with results for all splits
     """
     entry_threshold, exit_threshold = combination
-    
-    # Load model artifact once per combination (not per game)
-    model_artifact = load_model_artifact(config.model_name) if config.model_name else None
+    combo_start_time = time.time()
     
     results = {
         'entry_threshold': entry_threshold,
         'exit_threshold': exit_threshold,
     }
     
+    split_times = {}
+    
     # Run simulation for each split
     with connect(dsn) as conn:
         for split_name in ['train', 'valid', 'test']:
+            split_start = time.time()
             game_ids = game_splits[split_name]
             split_results = run_simulation_for_games(
                 conn,
@@ -486,9 +658,28 @@ def process_combination(
                 config,
                 model_artifact=model_artifact,
                 progress=progress,
-                task_id=task_id
+                task_id=task_id,
+                verbose=verbose
             )
+            split_elapsed = time.time() - split_start
+            split_times[split_name] = split_elapsed
             results[split_name] = split_results
+    
+    # Log combination summary in verbose mode
+    combo_elapsed = time.time() - combo_start_time
+    if verbose:
+        train_result = results['train']
+        valid_result = results['valid']
+        test_result = results['test']
+        # Use INFO level so it's visible even with progress bar
+        logger.info(f"[COMBO] entry={entry_threshold:.3f} exit={exit_threshold:.3f}: "
+                   f"train=${train_result['net_profit_dollars']:.2f} ({train_result['num_trades']} trades), "
+                   f"valid=${valid_result['net_profit_dollars']:.2f} ({valid_result['num_trades']} trades), "
+                   f"test=${test_result['net_profit_dollars']:.2f} ({test_result['num_trades']} trades)")
+    
+    # Always log performance metrics at DEBUG level
+    logger.debug(f"[PERF] Combination entry={entry_threshold:.3f} exit={exit_threshold:.3f}: {combo_elapsed:.2f}s "
+                 f"(train={split_times['train']:.2f}s, valid={split_times['valid']:.2f}s, test={split_times['test']:.2f}s)")
     
     return results
 
@@ -509,7 +700,7 @@ def get_git_hash() -> Optional[str]:
     return None
 
 
-def load_from_cache(cache_key: str, output_dir: Path, season_or_list: str) -> bool:
+def load_from_cache(cache_key: str, output_dir: Path, season_or_list: str, model_name: Optional[str] = None) -> bool:
     """
     Try to load grid search results from cache.
     
@@ -519,13 +710,16 @@ def load_from_cache(cache_key: str, output_dir: Path, season_or_list: str) -> bo
         return False
     
     try:
+        cache_start = time.time()
         cache = SimpleCache(ttl_seconds=86400 * 30, cache_file="grid_search_results.cache")
         cached_data = cache.get(cache_key)
+        cache_elapsed = time.time() - cache_start
         
         if cached_data is None:
+            logger.debug(f"[CACHE] MISS: {cache_key[:32]}... (check time: {cache_elapsed:.3f}s)")
             return False
         
-        logger.info(f"Cache HIT! Loading results from cache (key: {cache_key[:32]}...)")
+        logger.info(f"[CACHE] HIT: {cache_key[:32]}... (load time: {cache_elapsed:.3f}s)")
         
         # Extract results from cached data
         train_results = cached_data.get('training_results', [])
@@ -577,11 +771,17 @@ def load_from_cache(cache_key: str, output_dir: Path, season_or_list: str) -> bo
         timestamp = datetime.now(timezone.utc).isoformat()
         metadata = cached_data.get('metadata', {})
         
+        # Ensure args.model_name is included in metadata (for comparison script)
+        args_dict = metadata.get('args', {})
+        if model_name is not None:
+            args_dict['model_name'] = model_name
+        
         for split_name in ['train', 'valid', 'test']:
             json_path = output_dir / f'grid_results_{split_name}.json'
             json_data = {
                 'metadata': {
                     **metadata,
+                    'args': args_dict,  # Include args with model_name
                     'timestamp': timestamp,
                     'git_hash': git_hash,
                     'cached': True,
@@ -610,7 +810,7 @@ def load_from_cache(cache_key: str, output_dir: Path, season_or_list: str) -> bo
         return True
         
     except Exception as e:
-        logger.warning(f"Error loading from cache: {e}. Will run grid search normally.")
+        logger.warning(f"[CACHE] Error loading from cache: {e}. Will run grid search normally.")
         return False
 
 
@@ -622,6 +822,7 @@ def save_to_cache(cache_key: str, results_by_split: dict, final_selection: dict,
         return
     
     try:
+        cache_start = time.time()
         cache = SimpleCache(ttl_seconds=86400 * 30, cache_file="grid_search_results.cache")
         
         # Get top N train results
@@ -654,7 +855,8 @@ def save_to_cache(cache_key: str, results_by_split: dict, final_selection: dict,
         
         cache.set(cache_key, cache_data)
         cache.save()
-        logger.info(f"✓ Results cached (key: {cache_key[:32]}...)")
+        cache_elapsed = time.time() - cache_start
+        logger.info(f"[CACHE] SAVE: {cache_key[:32]}... (save time: {cache_elapsed:.3f}s)")
         
     except Exception as e:
         logger.warning(f"Error saving to cache: {e}")
@@ -697,8 +899,6 @@ def main():
     parser.add_argument('--top-n', type=int, default=10, help='Top N train combos to consider for selection (default: 10)')
     parser.add_argument('--bet-amount', type=float, default=20.0, help='Bet amount in dollars (default: 20.0)')
     parser.add_argument('--dsn', type=str, help='Database connection string (or use DATABASE_URL env var)')
-    parser.add_argument('--use-trade-data', action='store_true', default=True, help='Use trade-derived data (default: True)')
-    parser.add_argument('--no-use-trade-data', dest='use_trade_data', action='store_false', help='Use candlesticks instead')
     parser.add_argument('--exclude-first-seconds', type=int, default=60, help='Exclude first N seconds (default: 60)')
     parser.add_argument('--exclude-last-seconds', type=int, default=60, help='Exclude last N seconds (default: 60)')
     
@@ -721,6 +921,8 @@ def main():
     for handler in root.handlers:
         if isinstance(handler, RichHandler):
             handler.setLevel(log_level)
+    # Ensure module logger also uses the correct level
+    logger.setLevel(log_level)
     
     # Validate split ratios
     total_ratio = args.train_ratio + args.valid_ratio + args.test_ratio
@@ -728,8 +930,10 @@ def main():
         parser.error(f"Split ratios must sum to 1.0 (got {total_ratio})")
     
     # Generate cache key early to determine default output directory
+    # Note: Cache key is generated even with --no-cache for output directory purposes
+    # The --no-cache flag only prevents loading/saving from cache, not cache key generation
     cache_key = None
-    if args.season and CACHE_AVAILABLE and not args.no_cache:
+    if args.season and CACHE_AVAILABLE:
         try:
             cache_key = _generate_grid_search_cache_key(
                 season=args.season,
@@ -744,7 +948,6 @@ def main():
                 slippage_rate=args.slippage_rate,
                 exclude_first_seconds=args.exclude_first_seconds,
                 exclude_last_seconds=args.exclude_last_seconds,
-                use_trade_data=args.use_trade_data,
                 train_ratio=args.train_ratio,
                 valid_ratio=args.valid_ratio,
                 test_ratio=args.test_ratio,
@@ -772,7 +975,39 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = output_dir / 'plots'
     plots_dir.mkdir(exist_ok=True)
+    
+    # Add file handler for logging to output directory
+    log_file = output_dir / 'grid_search.log'
+    file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='w')
+    file_handler.setLevel(logging.DEBUG if args.verbose else logging.INFO)
+    # Use a simple format for file logging (without Rich markup)
+    file_formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)-8s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(file_formatter)
+    # Add to root logger so all logs go to file
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    
+    # Print cache key and output directory to console before removing RichHandler
+    console.print(f"[bold cyan]Output directory:[/bold cyan] {output_dir}")
+    if cache_key:
+        console.print(f"[bold cyan]Cache key:[/bold cyan] {cache_key}")
+    console.print(f"[bold cyan]Logging to:[/bold cyan] {log_file}")
+    
+    # Remove RichHandler from console so logs only go to file
+    # Progress bar will still work because it uses Rich's console directly, not logging
+    for handler in root_logger.handlers[:]:  # Copy list to avoid modification during iteration
+        if isinstance(handler, RichHandler):
+            root_logger.removeHandler(handler)
+    
     logger.info(f"Output directory: {output_dir}")
+    if cache_key:
+        logger.info(f"Cache key: {cache_key}")
+    logger.info(f"Logging to: {log_file}")
+    if args.verbose:
+        logger.info(f"Verbose mode enabled - detailed logs will be written to: {log_file}")
     
     # Create config
     config = GridSearchConfig(
@@ -793,7 +1028,6 @@ def main():
         test_ratio=args.test_ratio,
         top_n=args.top_n,
         bet_amount=args.bet_amount,
-        use_trade_data=args.use_trade_data,
         exclude_first_seconds=args.exclude_first_seconds,
         exclude_last_seconds=args.exclude_last_seconds,
         model_name=args.model_name
@@ -802,15 +1036,23 @@ def main():
     # Get database connection
     dsn = get_dsn(args.dsn)
     
+    # Initialize cache stats (used for tracking cache performance)
+    cache_stats = {'hits': 0, 'misses': 0, 'saves': 0}
+    
     # Try to load from cache (cache_key already generated above)
     if cache_key and CACHE_AVAILABLE and not args.no_cache:
         try:
             # Try to load from cache
-            if load_from_cache(cache_key, output_dir, args.season):
+            if load_from_cache(cache_key, output_dir, args.season, model_name=args.model_name):
                 logger.info("Grid search complete (loaded from cache).")
+                # Update cache stats
+                cache_stats['hits'] = 1
                 return 0
+            else:
+                cache_stats['misses'] = 1
         except Exception as e:
             logger.debug(f"Cache check failed: {e}. Will run grid search normally.")
+            cache_stats['misses'] = 1
     
     # Get game IDs
     with connect(dsn) as conn:
@@ -861,7 +1103,11 @@ def main():
     logger.debug(f"  Workers: {config.workers}")
     logger.debug(f"  Estimated time: ~{len(combinations) * 3 * 2.5 / 60 / config.workers:.1f} minutes")
     logger.debug("=" * 80)
-    logger.debug("Starting grid search (simulation logs suppressed for clarity)...")
+    if args.verbose:
+        logger.info("Starting grid search with VERBOSE logging enabled...")
+        logger.info("Verbose logs will show per-game and per-combination details")
+    else:
+        logger.debug("Starting grid search (simulation logs suppressed for clarity)...")
     logger.debug("")
     
     # Prepare game splits dict
@@ -871,11 +1117,29 @@ def main():
         'test': test_games
     }
     
+    # Load model artifact once (shared across all combinations)
+    # This avoids redundant JSON file reads and object creation
+    model_artifact = load_model_artifact(config.model_name, verbose=args.verbose) if config.model_name else None
+    if model_artifact:
+        logger.debug(f"[MODEL] Loaded model artifact: {config.model_name} (shared across all {len(combinations)} combinations)")
+    
     # Run grid search in parallel
     all_results = []
     completed = 0
     start_time = time.time()
     last_log_time = start_time
+    
+    # Error tracking
+    error_stats = {
+        'database_errors': 0,
+        'model_errors': 0,
+        'data_quality_errors': 0,
+        'unknown_errors': 0,
+        'failed_combinations': []
+    }
+    
+    # Progress milestone tracking
+    milestone_interval = max(10, len(combinations) // 20)  # Log every 5% or every 10, whichever is larger
     
     # Suppress verbose simulation logs during grid search (unless --verbose is enabled)
     root_logger = logging.getLogger()
@@ -912,10 +1176,15 @@ def main():
     total_games = len(train_games) + len(valid_games) + len(test_games)
     total_work_units = len(combinations) * total_games
     
+    # Detect if output is redirected (for logging to file)
+    # When output is redirected, disable Rich's stdout/stderr redirection so tee works
+    is_output_redirected = not sys.stdout.isatty() or not sys.stderr.isatty()
+    
     # Create Rich Progress object for sticky progress bar
     # redirect_stdout=True and redirect_stderr=True capture any prints/warnings
     # that don't go through RichHandler and re-render them above the progress bar
     # This is critical for keeping the progress bar "sticky" at the bottom
+    # BUT: disable redirection when output is redirected (e.g., with tee) so logs work
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[bold blue]Grid search[/bold blue]"),
@@ -932,8 +1201,8 @@ def main():
         console=console,
         transient=False,  # Keep it visible at the end
         refresh_per_second=4,  # Update 4 times per second (smooth but not too frequent)
-        redirect_stdout=True,  # Capture stdout (prints, etc.) and render above progress bar
-        redirect_stderr=True,  # Capture stderr (warnings, etc.) and render above progress bar
+        redirect_stdout=not is_output_redirected,  # Only redirect if output is to terminal
+        redirect_stderr=not is_output_redirected,  # Only redirect if output is to terminal
     )
     
     task_id = progress.add_task(
@@ -946,7 +1215,7 @@ def main():
         with progress:
             with ThreadPoolExecutor(max_workers=config.workers) as executor:
                 futures = {
-                    executor.submit(process_combination, combo, game_splits, config, dsn, progress, task_id): combo
+                    executor.submit(process_combination, combo, game_splits, config, dsn, model_artifact, progress, task_id, args.verbose): combo
                     for combo in combinations
                 }
                 
@@ -961,8 +1230,31 @@ def main():
                         result = future.result()
                         all_results.append(result)
                         completed += 1
+                        
+                        # Log progress milestones
+                        if completed % milestone_interval == 0 or completed == len(combinations):
+                            elapsed = time.time() - start_time
+                            rate = completed / elapsed if elapsed > 0 else 0
+                            remaining = (len(combinations) - completed) / rate if rate > 0 else 0
+                            logger.info(f"[PROGRESS] {completed}/{len(combinations)} combinations "
+                                       f"({completed/len(combinations)*100:.1f}%) - "
+                                       f"ETA: {remaining/60:.1f} minutes")
+                        
+                    except psycopg.Error as e:
+                        error_stats['database_errors'] += 1
+                        error_stats['failed_combinations'].append((entry, exit))
+                        logger.error(f"[ERRORS] Database error processing combination entry={entry:.3f}, exit={exit:.3f}: {e}")
+                    except ValueError as e:
+                        if 'model' in str(e).lower():
+                            error_stats['model_errors'] += 1
+                        else:
+                            error_stats['data_quality_errors'] += 1
+                        error_stats['failed_combinations'].append((entry, exit))
+                        logger.error(f"[ERRORS] Value error processing combination entry={entry:.3f}, exit={exit:.3f}: {e}")
                     except Exception as e:
-                        logger.error(f"Error processing combination entry={entry:.3f}, exit={exit:.3f}: {e}")
+                        error_stats['unknown_errors'] += 1
+                        error_stats['failed_combinations'].append((entry, exit))
+                        logger.error(f"[ERRORS] Unknown error processing combination entry={entry:.3f}, exit={exit:.3f}: {e}")
             
             # Mark as complete
             progress.update(task_id, current="complete")
@@ -971,6 +1263,38 @@ def main():
         logger.info("")
         logger.info("=" * 80)
         logger.info(f"✓ Completed all {len(combinations)} combinations in {total_time/60:.1f} minutes")
+        
+        # Performance warning - check if much slower than expected
+        expected_time_minutes = len(combinations) * 3 * 2.5 / 60 / config.workers
+        actual_time_minutes = total_time / 60
+        if actual_time_minutes > expected_time_minutes * 2:
+            logger.warning(f"[PERF] Grid search took much longer than expected: "
+                           f"{actual_time_minutes:.1f} min actual vs {expected_time_minutes:.1f} min expected. "
+                           f"This may indicate performance issues.")
+        
+        # Log error summary
+        # Sum only the integer error counts, excluding the failed_combinations list
+        total_errors = (error_stats['database_errors'] + 
+                       error_stats['model_errors'] + 
+                       error_stats['data_quality_errors'] + 
+                       error_stats['unknown_errors'])
+        if total_errors > 0:
+            logger.warning(f"[ERRORS] Summary: {total_errors} total errors - "
+                          f"DB: {error_stats['database_errors']}, "
+                          f"Model: {error_stats['model_errors']}, "
+                          f"Data: {error_stats['data_quality_errors']}, "
+                          f"Unknown: {error_stats['unknown_errors']}")
+            if error_stats['failed_combinations']:
+                failed_preview = error_stats['failed_combinations'][:5]
+                logger.warning(f"[ERRORS] Failed combinations (showing first 5): {failed_preview}")
+        
+        # Log cache stats if available
+        if cache_stats['hits'] + cache_stats['misses'] > 0:
+            total_cache_ops = cache_stats['hits'] + cache_stats['misses']
+            hit_rate = cache_stats['hits'] / total_cache_ops * 100 if total_cache_ops > 0 else 0
+            logger.info(f"[CACHE] Performance: {cache_stats['hits']} hits, {cache_stats['misses']} misses "
+                       f"({hit_rate:.1f}% hit rate), {cache_stats['saves']} saves")
+        
         logger.info("=" * 80)
     finally:
         # Restore original log levels
@@ -998,6 +1322,27 @@ def main():
             split_result['exit_threshold'] = result['exit_threshold']
             results_by_split[split_name].append(split_result)
     
+    # Result consistency checks
+    train_count = len(results_by_split['train'])
+    valid_count = len(results_by_split['valid'])
+    test_count = len(results_by_split['test'])
+    
+    if train_count != valid_count or valid_count != test_count:
+        logger.warning(f"[CONSISTENCY] Mismatched result counts: "
+                       f"train={train_count}, valid={valid_count}, test={test_count}. "
+                       f"This may indicate some combinations failed to process.")
+    
+    if train_count < len(combinations):
+        missing = len(combinations) - train_count
+        logger.warning(f"[CONSISTENCY] Missing {missing} train results out of {len(combinations)} combinations. "
+                       f"Some combinations may have failed.")
+    
+    # Check for duplicate combinations
+    train_combos = {(r['entry_threshold'], r['exit_threshold']) for r in results_by_split['train']}
+    if len(train_combos) < train_count:
+        logger.warning(f"[CONSISTENCY] Duplicate combinations found in train results. "
+                       f"Expected {train_count} unique, found {len(train_combos)}.")
+    
     # Write CSV files
     import csv
     for split_name in ['train', 'valid', 'test']:
@@ -1006,7 +1351,8 @@ def main():
             writer = csv.DictWriter(f, fieldnames=[
                 'entry_threshold', 'exit_threshold', 'net_profit_dollars', 'num_trades',
                 'win_rate', 'avg_net_profit_per_trade', 'profit_factor', 'max_drawdown',
-                'total_fees', 'avg_hold_time', 'is_valid'
+                'total_fees', 'avg_hold_time', 'is_valid',
+                'games_processed', 'games_skipped', 'total_data_points'
             ])
             writer.writeheader()
             for row in results_by_split[split_name]:
@@ -1105,6 +1451,77 @@ def main():
             valid_combo_result = combo
             break
     
+    # Selection validation warnings
+    if test_combo_result is None:
+        logger.warning(f"[SELECTION] Test result not found for selected combo "
+                       f"(entry={best_combo['entry_threshold']:.3f}, exit={best_combo['exit_threshold']:.3f}). "
+                       f"Cannot evaluate final performance.")
+    
+    # Warn if train/valid/test results are inconsistent
+    # Note: We compare profit-per-game (not raw dollars) because splits have different sizes
+    if train_combo_result and valid_combo_result and test_combo_result:
+        train_profit = train_combo_result['net_profit_dollars']
+        valid_profit = valid_combo_result['net_profit_dollars']
+        test_profit = test_combo_result['net_profit_dollars']
+        
+        train_games = train_combo_result.get('games_processed', 0)
+        valid_games = valid_combo_result.get('games_processed', 0)
+        test_games = test_combo_result.get('games_processed', 0)
+        
+        # Calculate profit per game (normalized metric)
+        train_profit_per_game = train_profit / train_games if train_games > 0 else 0.0
+        valid_profit_per_game = valid_profit / valid_games if valid_games > 0 else 0.0
+        test_profit_per_game = test_profit / test_games if test_games > 0 else 0.0
+        
+        # Check for large discrepancies in profit-per-game (possible overfitting)
+        # Train should not be significantly better than valid on a per-game basis
+        if train_games > 0 and valid_games > 0:
+            train_valid_ratio = train_profit_per_game / valid_profit_per_game if valid_profit_per_game != 0 else float('inf')
+            if train_profit_per_game > 0 and valid_profit_per_game > 0:
+                if train_valid_ratio > 1.5:
+                    logger.warning(f"[SELECTION] Large train/valid discrepancy (profit-per-game): "
+                                   f"Train=${train_profit:.2f} ({train_games} games, ${train_profit_per_game:.4f}/game), "
+                                   f"Valid=${valid_profit:.2f} ({valid_games} games, ${valid_profit_per_game:.4f}/game), "
+                                   f"ratio={train_valid_ratio:.2f}x. Possible overfitting.")
+            elif train_profit_per_game > 0 and valid_profit_per_game <= 0:
+                logger.warning(f"[SELECTION] Train profitable but valid not: "
+                               f"Train=${train_profit:.2f} ({train_games} games, ${train_profit_per_game:.4f}/game), "
+                               f"Valid=${valid_profit:.2f} ({valid_games} games). Possible overfitting.")
+        
+        # Valid and test should be similar (same split size)
+        if valid_games > 0 and test_games > 0:
+            valid_test_ratio = valid_profit_per_game / test_profit_per_game if test_profit_per_game != 0 else float('inf')
+            if valid_profit_per_game > 0 and test_profit_per_game > 0:
+                if valid_test_ratio > 1.5 or valid_test_ratio < 0.67:  # >1.5x or <0.67x (inverse)
+                    logger.warning(f"[SELECTION] Large valid/test discrepancy (profit-per-game): "
+                                   f"Valid=${valid_profit:.2f} ({valid_games} games, ${valid_profit_per_game:.4f}/game), "
+                                   f"Test=${test_profit:.2f} ({test_games} games, ${test_profit_per_game:.4f}/game), "
+                                   f"ratio={valid_test_ratio:.2f}x. Selection may not generalize.")
+            elif valid_profit_per_game > 0 and test_profit_per_game <= 0:
+                logger.warning(f"[SELECTION] Valid profitable but test not: "
+                               f"Valid=${valid_profit:.2f} ({valid_games} games, ${valid_profit_per_game:.4f}/game), "
+                               f"Test=${test_profit:.2f} ({test_games} games). Selection may not generalize.")
+        
+        # Warn if test is much worse than train/valid on a per-game basis
+        if train_games > 0 and valid_games > 0 and test_games > 0:
+            if test_profit_per_game < train_profit_per_game * 0.5 and test_profit_per_game < valid_profit_per_game * 0.5:
+                if train_profit_per_game > 0 or valid_profit_per_game > 0:
+                    logger.warning(f"[SELECTION] Test performance is significantly worse than train/valid (profit-per-game): "
+                                   f"Train=${train_profit_per_game:.4f}/game, Valid=${valid_profit_per_game:.4f}/game, "
+                                   f"Test=${test_profit_per_game:.4f}/game. Possible overfitting or data leakage.")
+    
+    # Warn if selected combo has very few trades
+    if train_combo_result and train_combo_result.get('num_trades', 0) < config.min_trade_count:
+        logger.warning(f"[SELECTION] Selected combo has fewer trades than minimum: "
+                       f"{train_combo_result.get('num_trades', 0)} < {config.min_trade_count}. "
+                       f"Results may be unreliable.")
+    
+    # Warn if fallback was used
+    if not best_combo:
+        logger.warning(f"[SELECTION] Fallback to best train combo used. "
+                       f"Top {config.top_n} train combos had no matching valid results. "
+                       f"This may indicate a data consistency issue.")
+    
     # Write final selection
     final_selection = {
         'chosen_params': best_combo,
@@ -1125,6 +1542,45 @@ def main():
         save_to_cache(cache_key, results_by_split, final_selection, 
                      train_games, valid_games, test_games,
                      combinations, config, season_or_list)
+        cache_stats['saves'] = 1
+    
+    # Log data quality summary
+    if all_results:
+        total_games_processed = sum(r['train'].get('games_processed', 0) + 
+                                    r['valid'].get('games_processed', 0) + 
+                                    r['test'].get('games_processed', 0) 
+                                    for r in all_results)
+        total_games_skipped = sum(r['train'].get('games_skipped', 0) + 
+                                  r['valid'].get('games_skipped', 0) + 
+                                  r['test'].get('games_skipped', 0) 
+                                  for r in all_results)
+        total_data_points = sum(r['train'].get('total_data_points', 0) + 
+                               r['valid'].get('total_data_points', 0) + 
+                               r['test'].get('total_data_points', 0) 
+                               for r in all_results)
+        
+        if total_games_processed + total_games_skipped > 0:
+            skip_rate = total_games_skipped / (total_games_processed + total_games_skipped) * 100
+            logger.info(f"[DATA_QUALITY] Summary: {total_games_processed} games processed, "
+                       f"{total_games_skipped} skipped ({skip_rate:.1f}%), "
+                       f"{total_data_points} total data points")
+            
+            # Data quality warnings
+            if skip_rate > 20.0:
+                logger.warning(f"[DATA_QUALITY] High skip rate: {skip_rate:.1f}% "
+                               f"({total_games_skipped} skipped / {total_games_processed + total_games_skipped} total). "
+                               f"This may indicate data quality issues.")
+            
+            if total_games_processed < 50:
+                logger.warning(f"[DATA_QUALITY] Very few games processed: {total_games_processed}. "
+                               f"Results may be unreliable.")
+            
+            if total_data_points == 0:
+                logger.warning(f"[DATA_QUALITY] No data points processed across all games. "
+                               f"This indicates a serious data issue.")
+            elif total_data_points < 1000:
+                logger.warning(f"[DATA_QUALITY] Very few data points: {total_data_points}. "
+                               f"Results may be unreliable.")
     
     logger.info(f"Grid search complete. Selected: entry={best_combo['entry_threshold']:.3f}, exit={best_combo['exit_threshold']:.3f}")
     test_profit = test_combo_result['net_profit_dollars'] if test_combo_result else 0.0

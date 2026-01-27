@@ -29,11 +29,21 @@
         <div id="comparisonSummary" class="results-section" style="display: none;">
             <h3>
                 Summary Comparison
-                <span class="tooltip-icon" title="Test set performance metrics for each model. Models are sorted by test profit. The 'Improvement' column shows percentage change vs. ESPN baseline.">
+                <span class="tooltip-icon" title="Test set performance metrics for each model. Models are sorted by test profit (descending).">
                     ?
                     <span class="tooltip-content">
-                        <strong>What is this?</strong>
-                        <p>Test set performance metrics for each model. Models are sorted by test profit. The 'Improvement' column shows percentage change vs. ESPN baseline.</p>
+                        <strong>Summary Comparison Metrics</strong>
+                        <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                            <li><strong>Test Profit</strong>: Total net profit after fees. Primary performance metric.</li>
+                            <li><strong>Profit Imp.</strong>: Percentage change vs ESPN baseline. Positive = better than baseline.</li>
+                            <li><strong>Profit/Trade</strong>: Average profit per trade. Higher = more efficient use of opportunities.</li>
+                            <li><strong>P/T Imp.</strong>: Profit/trade improvement vs baseline. Shows efficiency gains.</li>
+                            <li><strong>Trades</strong>: Number of trades executed. More trades = more opportunities but also more fees.</li>
+                            <li><strong>Win Rate</strong>: Percentage of winning trades. Higher = more reliable predictions.</li>
+                            <li><strong>Profit Factor</strong>: Gross profit / Gross loss. Higher = better risk-adjusted returns (industry standard).</li>
+                            <li><strong>Max DD</strong>: Maximum drawdown (peak-to-trough decline). Lower = less risk, need less capital buffer.</li>
+                            <li><strong>Entry/Exit</strong>: Optimal threshold values chosen by grid search.</li>
+                        </ul>
                     </span>
                 </span>
             </h3>

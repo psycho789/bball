@@ -1,0 +1,5 @@
+ corr_overround_has_ml | corr_ml_spread | corr_ml_total | corr_spread_total | all_three | ml_without_spread | ml_without_total | overround_without_flag | flag_without_overround | total_rows | rows_with_moneyline | rows_with_overround 
+-----------------------+----------------+---------------+-------------------+-----------+-------------------+------------------+------------------------+------------------------+------------+---------------------+---------------------
+                       |                |               |                   |         0 |                 0 |                0 |                      0 |                      0 |          0 |                   0 |                   0
+(1 row)
+

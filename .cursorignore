@@ -22,12 +22,12 @@ __pycache__/
 webapp/.cache/
 
 # Log files
-*.log
+# *.log
 webapp/logs/
 logs/
 
 # Artifacts and backups
-artifacts/
+# artifacts/
 
 # Cursor analysis/research files (optional - uncomment if you don't want these indexed)
 # cursor-files/

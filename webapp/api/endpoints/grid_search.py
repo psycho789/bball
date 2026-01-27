@@ -337,7 +337,6 @@ def _run_grid_search_background(
     slippage_rate: float,
     exclude_first_seconds: int,
     exclude_last_seconds: int,
-    use_trade_data: bool,
     train_ratio: float,
     valid_ratio: float,
     test_ratio: float,
@@ -389,7 +388,6 @@ def _run_grid_search_background(
             test_ratio=test_ratio,
             top_n=top_n,
             bet_amount=bet_amount,
-            use_trade_data=use_trade_data,
             exclude_first_seconds=exclude_first_seconds,
             exclude_last_seconds=exclude_last_seconds,
             model_name=model_name
@@ -779,7 +777,6 @@ def _generate_grid_search_cache_key(
     slippage_rate: float,
     exclude_first_seconds: int,
     exclude_last_seconds: int,
-    use_trade_data: bool,
     train_ratio: float,
     valid_ratio: float,
     test_ratio: float,
@@ -808,7 +805,6 @@ def _generate_grid_search_cache_key(
         "slippage_rate": slippage_rate,
         "exclude_first_seconds": exclude_first_seconds,
         "exclude_last_seconds": exclude_last_seconds,
-        "use_trade_data": use_trade_data,
         "train_ratio": train_ratio,
         "valid_ratio": valid_ratio,
         "test_ratio": test_ratio,
@@ -1009,14 +1005,14 @@ def run_grid_search(
     slippage_rate: float = Query(0.0, description="Slippage rate as decimal"),
     exclude_first_seconds: int = Query(60, description="Exclude first N seconds of game"),
     exclude_last_seconds: int = Query(60, description="Exclude last N seconds of game"),
-    use_trade_data: bool = Query(True, description="Use trade-derived data vs candlesticks"),
+    use_trade_data: bool = Query(False, description="DEPRECATED: Ignored. Canonical dataset uses candlestick data."),
     train_ratio: float = Query(0.70, description="Training set ratio"),
     valid_ratio: float = Query(0.15, description="Validation set ratio"),
     test_ratio: float = Query(0.15, description="Test set ratio"),
     top_n: int = Query(10, description="Top N train combos to consider for selection"),
     min_trade_count: int = Query(200, description="Minimum trades required for valid combo"),
     max_games: Optional[int] = Query(None, description="Limit number of games for testing (default: no limit)"),
-    model_name: Optional[str] = Query(None, description="Model name: 'logreg_platt', 'logreg_isotonic', 'catboost_platt', 'catboost_isotonic', or None for ESPN probabilities"),
+    model_name: Optional[str] = Query(None, description="Model name: 'catboost_baseline_platt_v2', 'catboost_baseline_isotonic_v2', 'catboost_odds_platt_v2', 'catboost_odds_isotonic_v2', 'catboost_baseline_no_interaction_platt_v2', 'catboost_baseline_no_interaction_isotonic_v2', 'catboost_odds_no_interaction_platt_v2', 'catboost_odds_no_interaction_isotonic_v2', or None for ESPN probabilities. Only v2 models are supported."),
 ) -> dict[str, Any]:
     """
     Start a grid search hyperparameter optimization.
@@ -1067,7 +1063,6 @@ def run_grid_search(
         slippage_rate=slippage_rate,
         exclude_first_seconds=exclude_first_seconds,
         exclude_last_seconds=exclude_last_seconds,
-        use_trade_data=use_trade_data,
         train_ratio=train_ratio,
         valid_ratio=valid_ratio,
         test_ratio=test_ratio,
@@ -1387,7 +1382,6 @@ def run_grid_search(
             slippage_rate,
             exclude_first_seconds,
             exclude_last_seconds,
-            use_trade_data,
             train_ratio,
             valid_ratio,
             test_ratio,
@@ -1631,6 +1625,15 @@ def get_grid_search_comparison() -> dict[str, Any]:
             raise HTTPException(
                 status_code=404,
                 detail="No models found in comparison data"
+            )
+        
+        # Filter to only v2 models (model_name ends with _v2 or is ESPN (default))
+        models = [m for m in models if m.get('model_name', '').endswith('_v2') or m.get('model_name') == 'ESPN (default)']
+        
+        if not models:
+            raise HTTPException(
+                status_code=404,
+                detail="No v2 models found in comparison data"
             )
         
         # Load visualization data for each model

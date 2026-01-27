@@ -68,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bins", type=int, default=20, help="Bins for ECE/reliability (default: 20).")
     p.add_argument("--plot-calibration", action="store_true", help="Write an SVG reliability diagram next to the JSON report.")
     p.add_argument("--verbose", action="store_true", help="Enable verbose logging with detailed progress information.")
-    p.add_argument("--workers", type=int, default=1, help="Number of parallel workers for per-bucket metrics (default: 1, no parallelization). NOTE: Currently not implemented due to artifact pickling limitations.")
+    p.add_argument("--workers", type=int, default=8, help="Number of parallel workers for per-bucket metrics (default: 1, no parallelization). NOTE: Currently not implemented due to artifact pickling limitations.")
     p.add_argument("--disable-calibration", action="store_true", help="Evaluate model without Platt calibration (for comparison).")
     return p.parse_args()
 
@@ -383,13 +383,48 @@ def _load_evaluation_data(conn, season_start: int, artifact) -> pd.DataFrame:
     """
     Load evaluation data from ESPN tables for a specific season.
     
-    Determines if interaction terms are needed based on artifact feature_names.
+    Determines if interaction terms and opening odds are needed based on artifact feature_names.
     """
     use_interaction_terms = any("scaled" in fn and ("score_diff_div_sqrt" in fn or "espn_home_prob" in fn or "period" in fn) for fn in artifact.feature_names)
+    use_opening_odds = any("opening" in fn.lower() for fn in artifact.feature_names)
     
     # Base query: ESPN probabilities + game state
-    base_query = """
-    WITH espn_base AS (
+    # Add opening odds CTE if needed
+    opening_odds_cte = ""
+    opening_odds_join = ""
+    opening_odds_select = ""
+    
+    if use_opening_odds:
+        opening_odds_cte = """
+        opening_odds AS (
+            -- Pivot opening odds by market_type and side
+            SELECT 
+                espn_game_id,
+                MAX(odds_decimal) FILTER (WHERE market_type = 'moneyline' AND side = 'home') AS opening_moneyline_home,
+                MAX(odds_decimal) FILTER (WHERE market_type = 'moneyline' AND side = 'away') AS opening_moneyline_away,
+                MAX(line_value) FILTER (WHERE market_type = 'spread' AND side = 'home') AS opening_spread,
+                MAX(line_value) FILTER (WHERE market_type = 'total' AND side = 'over') AS opening_total
+            FROM external.sportsbook_odds_snapshots
+            WHERE is_opening_line = TRUE
+                AND espn_game_id IS NOT NULL
+            GROUP BY espn_game_id
+        ),
+        """
+        opening_odds_join = """
+            LEFT JOIN opening_odds oo
+                ON e.game_id = oo.espn_game_id
+        """
+        opening_odds_select = """
+        ,
+        oo.opening_moneyline_home,
+        oo.opening_moneyline_away,
+        oo.opening_spread,
+        oo.opening_total
+        """
+    
+    base_query = f"""
+    WITH {opening_odds_cte}
+    espn_base AS (
         SELECT 
             p.season_label,
             p.game_id,
@@ -418,7 +453,7 @@ def _load_evaluation_data(conn, season_start: int, artifact) -> pd.DataFrame:
             AND p.event_id = e.event_id
         WHERE e.time_remaining IS NOT NULL
             AND e.point_differential IS NOT NULL
-            AND CAST(SUBSTRING(p.season_label FROM '^([0-9]{4})') AS INTEGER) = %s
+            AND CAST(SUBSTRING(p.season_label FROM '^([0-9]{{4}})') AS INTEGER) = %s
     ),
     espn_with_features AS (
         SELECT 
@@ -455,13 +490,13 @@ def _load_evaluation_data(conn, season_start: int, artifact) -> pd.DataFrame:
             WHEN sg.away_score > sg.home_score THEN 1
             ELSE NULL
         END AS final_winning_team,
-        CAST(SUBSTRING(e.season_label FROM '^([0-9]{4})') AS INTEGER) AS season_start,
+        CAST(SUBSTRING(e.season_label FROM '^([0-9]{{4}})') AS INTEGER) AS season_start,
         -- Calculate bucket_seconds_remaining (round down to nearest 60 seconds for grouping)
         CASE 
             WHEN e.time_remaining IS NOT NULL THEN
                 (FLOOR(e.time_remaining / 60.0) * 60)::INTEGER
             ELSE NULL
-        END AS bucket_seconds_remaining
+        END AS bucket_seconds_remaining{opening_odds_select}
     """
     
     # Add interaction terms if needed
@@ -477,10 +512,10 @@ def _load_evaluation_data(conn, season_start: int, artifact) -> pd.DataFrame:
     else:
         interaction_select = ""
     
-    query = base_query + interaction_select + """
+    query = base_query + interaction_select + f"""
     FROM espn_with_features e
     LEFT JOIN espn.scoreboard_games sg 
-        ON e.game_id = sg.event_id
+        ON e.game_id = sg.event_id{opening_odds_join}
     ORDER BY e.season_label, e.game_id, e.sequence_number
     """
     
@@ -488,6 +523,21 @@ def _load_evaluation_data(conn, season_start: int, artifact) -> pd.DataFrame:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, message=".*pandas only supports SQLAlchemy.*")
         df = pd.read_sql(query, conn, params=(season_start,))
+    
+    # Compute opening odds engineered features if needed
+    if use_opening_odds and len(df) > 0:
+        from scripts.lib._winprob_lib import compute_opening_odds_features
+        
+        odds_features = compute_opening_odds_features(
+            opening_moneyline_home=df['opening_moneyline_home'].to_numpy() if 'opening_moneyline_home' in df.columns else None,
+            opening_moneyline_away=df['opening_moneyline_away'].to_numpy() if 'opening_moneyline_away' in df.columns else None,
+            opening_spread=df['opening_spread'].to_numpy() if 'opening_spread' in df.columns else None,
+            opening_total=df['opening_total'].to_numpy() if 'opening_total' in df.columns else None,
+        )
+        
+        # Add engineered features to dataframe
+        df['opening_prob_home_fair'] = odds_features['opening_prob_home_fair']
+        df['opening_overround'] = odds_features['opening_overround']
     
     return df
 
@@ -578,12 +628,37 @@ def main() -> int:
         if "period" in df.columns:
             build_matrix_kwargs["period"] = df["period"].astype(int).tolist()
     
+    # Add opening odds features if present in artifact
+    # Note: opening_prob_home_fair, opening_spread, opening_total are NOT features - they're baseline inputs
+    use_opening_odds = any("opening" in fn.lower() for fn in art.feature_names)
+    logger.debug(f"Using opening odds features: {use_opening_odds}")
+    if use_opening_odds:
+        if "opening_overround" in df.columns:
+            build_matrix_kwargs["opening_overround"] = df["opening_overround"].astype(float).to_numpy()
+        # Pass odds_nan_policy="keep" for CatBoost models
+        build_matrix_kwargs["odds_nan_policy"] = "keep"
+    
     X = build_design_matrix(**build_matrix_kwargs)
     logger.debug(f"Design matrix shape: {X.shape}, built in {time.time() - matrix_start:.2f}s")
     
     logger.info("Making predictions")
     predict_start = time.time()
-    p = predict_proba(art, X=X)
+    # Check if model uses baseline using the artifact flag
+    uses_baseline = getattr(art, 'uses_opening_odds_baseline', None)
+    if uses_baseline is None:
+        # Fallback heuristic for older artifacts
+        has_opening_odds_features = any("opening" in fn.lower() or "overround" in fn.lower() for fn in art.feature_names)
+        opening_prob_not_a_feature = "opening_prob_home_fair" not in art.feature_names
+        uses_baseline = has_opening_odds_features and opening_prob_not_a_feature
+    
+    if uses_baseline and "opening_prob_home_fair" in df.columns:
+        p = predict_proba(
+            art, 
+            X=X,
+            opening_prob_home_fair=df["opening_prob_home_fair"].astype(float).to_numpy(),
+        )
+    else:
+        p = predict_proba(art, X=X)
     logger.debug(f"Predictions completed in {time.time() - predict_start:.2f}s")
     logger.debug(f"Prediction stats: mean={np.mean(p):.4f}, std={np.std(p):.4f}, min={np.min(p):.4f}, max={np.max(p):.4f}")
 
@@ -656,8 +731,31 @@ def main() -> int:
             if "period" in sub.columns:
                 build_matrix_kwargs_b["period"] = sub["period"].astype(int).tolist()
         
+        # Add opening odds features if present in artifact (same as overall metrics)
+        # Note: opening_prob_home_fair, opening_spread, opening_total are NOT features - they're baseline inputs
+        if use_opening_odds:
+            if "opening_overround" in sub.columns:
+                build_matrix_kwargs_b["opening_overround"] = sub["opening_overround"].astype(float).to_numpy()
+            # Pass odds_nan_policy="keep" for CatBoost models
+            build_matrix_kwargs_b["odds_nan_policy"] = "keep"
+        
         Xb = build_design_matrix(**build_matrix_kwargs_b)
-        pb = predict_proba(art, X=Xb)
+        # Check if model uses baseline using the artifact flag
+        uses_baseline = getattr(art, 'uses_opening_odds_baseline', None)
+        if uses_baseline is None:
+            # Fallback heuristic for older artifacts
+            has_opening_odds_features = any("opening" in fn.lower() or "overround" in fn.lower() for fn in art.feature_names)
+            opening_prob_not_a_feature = "opening_prob_home_fair" not in art.feature_names
+            uses_baseline = has_opening_odds_features and opening_prob_not_a_feature
+        
+        if uses_baseline and "opening_prob_home_fair" in sub.columns:
+            pb = predict_proba(
+                art, 
+                X=Xb,
+                opening_prob_home_fair=sub["opening_prob_home_fair"].astype(float).to_numpy(),
+            )
+        else:
+            pb = predict_proba(art, X=Xb)
         per_bucket.append(
             {
                 "bucket_seconds_remaining": int(b),

@@ -1,0 +1,5 @@
+ total_games_with_timestamped_odds | games_within_5_minutes | games_within_15_minutes | games_within_60_minutes | games_with_pre_tip_odds | avg_minutes_before_start  | earliest_minutes_before_start 
+-----------------------------------+------------------------+-------------------------+-------------------------+-------------------------+---------------------------+-------------------------------
+                               394 |                     58 |                      70 |                     147 |                     394 | -231.14623386737872719187 |        -1721.3500000000000000
+(1 row)
+

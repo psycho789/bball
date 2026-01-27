@@ -9,6 +9,25 @@
 let gridSearchComparisonData = null;
 
 /**
+ * Map technical model names to readable display names
+ */
+function getModelDisplayName(modelName) {
+    const modelNameMap = {
+        'catboost_baseline_isotonic_v2': 'Baseline w/ Interaction Terms Isotonic',
+        'catboost_baseline_platt_v2': 'Baseline w/ Interaction Terms Platt',
+        'catboost_baseline_no_interaction_isotonic_v2': 'Baseline w/o Interaction Terms Isotonic',
+        'catboost_baseline_no_interaction_platt_v2': 'Baseline w/o Interaction Terms Platt',
+        'catboost_odds_isotonic_v2': 'Odds w/ Interaction Terms Isotonic',
+        'catboost_odds_platt_v2': 'Odds w/ Interaction Terms Platt',
+        'catboost_odds_no_interaction_isotonic_v2': 'Odds w/o Interaction Terms Isotonic',
+        'catboost_odds_no_interaction_platt_v2': 'Odds w/o Interaction Terms Platt',
+        'ESPN (default)': 'ESPN (default)'
+    };
+    
+    return modelNameMap[modelName] || modelName;
+}
+
+/**
  * Load grid search comparison data from backend
  */
 async function loadGridSearchComparison() {
@@ -83,6 +102,18 @@ function renderComparisonSummary(data) {
     // Find baseline (ESPN model)
     const baseline = models.find(m => m.model_name === 'ESPN (default)');
     const baselineProfit = baseline?.test_metrics?.net_profit_dollars;
+    const baselineProfitPerTrade = baseline?.test_metrics?.avg_net_profit_per_trade;
+    
+    // Helper function to calculate improvement percentage
+    function calculateImprovement(value, baselineValue) {
+        if (!baselineValue || baselineValue === 0) {
+            if (value > 0) return '+∞';
+            if (value < 0) return '-∞';
+            return 'N/A';
+        }
+        const improvementPct = ((value - baselineValue) / Math.abs(baselineValue)) * 100;
+        return `${improvementPct >= 0 ? '+' : ''}${improvementPct.toFixed(1)}%`;
+    }
     
     // Build table HTML
     let html = `
@@ -91,12 +122,15 @@ function renderComparisonSummary(data) {
                 <tr style="background: var(--bg-secondary);">
                     <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: left;">Model</th>
                     <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Test Profit</th>
-                    <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Improvement</th>
+                    <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Profit Imp.</th>
+                    <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Profit/Trade</th>
+                    <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">P/T Imp.</th>
                     <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Trades</th>
                     <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Win Rate</th>
+                    <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Profit Factor</th>
+                    <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Max DD</th>
                     <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Entry</th>
                     <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Exit</th>
-                    <th style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">Profit/Trade</th>
                 </tr>
             </thead>
             <tbody>
@@ -117,16 +151,20 @@ function renderComparisonSummary(data) {
         const trades = testMetrics.num_trades;
         const winRate = testMetrics.win_rate;
         const profitPerTrade = testMetrics.avg_net_profit_per_trade;
+        const profitFactor = testMetrics.profit_factor;
+        const maxDrawdown = testMetrics.max_drawdown;
         const entry = chosenParams.entry_threshold;
         const exit = chosenParams.exit_threshold;
         
-        // Calculate improvement
-        let improvement = '';
-        if (baselineProfit && baselineProfit !== 0 && model.model_name !== 'ESPN (default)') {
-            const improvementPct = ((profit - baselineProfit) / Math.abs(baselineProfit)) * 100;
-            improvement = `${improvementPct >= 0 ? '+' : ''}${improvementPct.toFixed(1)}%`;
-        } else if (model.model_name === 'ESPN (default)') {
-            improvement = '(baseline)';
+        // Calculate improvements
+        let profitImprovement = '';
+        let profitPerTradeImprovement = '';
+        if (model.model_name === 'ESPN (default)') {
+            profitImprovement = '(baseline)';
+            profitPerTradeImprovement = '(baseline)';
+        } else if (baselineProfit !== undefined && baselineProfitPerTrade !== undefined) {
+            profitImprovement = calculateImprovement(profit, baselineProfit);
+            profitPerTradeImprovement = calculateImprovement(profitPerTrade, baselineProfitPerTrade);
         }
         
         // Format values
@@ -135,21 +173,34 @@ function renderComparisonSummary(data) {
         const entryStr = entry !== undefined ? entry.toFixed(3).replace(/\.?0+$/, '') : 'N/A';
         const exitStr = exit !== undefined ? exit.toFixed(3).replace(/\.?0+$/, '') : 'N/A';
         const profitPerTradeStr = profitPerTrade !== undefined ? `$${profitPerTrade.toFixed(2)}` : 'N/A';
+        const profitFactorStr = profitFactor !== undefined ? profitFactor.toFixed(2) : 'N/A';
+        const maxDrawdownStr = maxDrawdown !== undefined ? `$${Math.abs(maxDrawdown).toFixed(2)}` : 'N/A';
         
         // Highlight best profit
         const isBest = sortedModels[0] === model;
         const rowStyle = isBest ? 'background: rgba(124, 58, 237, 0.1);' : '';
         
+        // Color code improvements
+        const profitImpColor = profitImprovement.startsWith('+') ? 'var(--success)' : 
+                              profitImprovement.startsWith('-') ? 'var(--error)' : 
+                              'var(--text-secondary)';
+        const ptImpColor = profitPerTradeImprovement.startsWith('+') ? 'var(--success)' : 
+                          profitPerTradeImprovement.startsWith('-') ? 'var(--error)' : 
+                          'var(--text-secondary)';
+        
         html += `
             <tr style="${rowStyle}">
-                <td style="padding: 0.75rem; border: 1px solid var(--border-color);"><strong>${model.model_name}</strong></td>
+                <td style="padding: 0.75rem; border: 1px solid var(--border-color);"><strong>${getModelDisplayName(model.model_name)}</strong></td>
                 <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${profitStr}</td>
-                <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right; color: ${improvement.startsWith('+') ? 'var(--success)' : improvement.startsWith('-') ? 'var(--error)' : 'var(--text-secondary)'};">${improvement}</td>
+                <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right; color: ${profitImpColor};">${profitImprovement}</td>
+                <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${profitPerTradeStr}</td>
+                <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right; color: ${ptImpColor};">${profitPerTradeImprovement}</td>
                 <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${trades !== undefined ? trades : 'N/A'}</td>
                 <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${winRateStr}</td>
+                <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${profitFactorStr}</td>
+                <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${maxDrawdownStr}</td>
                 <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${entryStr}</td>
                 <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${exitStr}</td>
-                <td style="padding: 0.75rem; border: 1px solid var(--border-color); text-align: right;">${profitPerTradeStr}</td>
             </tr>
         `;
     });
@@ -407,7 +458,7 @@ function renderHeatmapType(models, vizData, heatmapKey, containerId, titleSuffix
         modelContainer.className = 'model-heatmap-container';
         
         const title = document.createElement('h5');
-        title.textContent = model.model_name;
+        title.textContent = getModelDisplayName(model.model_name);
         modelContainer.appendChild(title);
         
         const canvas = document.createElement('canvas');
@@ -416,7 +467,7 @@ function renderHeatmapType(models, vizData, heatmapKey, containerId, titleSuffix
         
         // Add click handler to open modal
         canvas.addEventListener('click', () => {
-            openHeatmapModal(heatmapData, `${model.model_name} - ${titleSuffix}`, globalScale);
+            openHeatmapModal(heatmapData, `${getModelDisplayName(model.model_name)} - ${titleSuffix}`, globalScale);
         });
         
         // Add "Click to enlarge" hint
@@ -451,7 +502,7 @@ function renderDetailedMetrics(data) {
         
         html += `
             <div class="summary-card" style="background: var(--card-bg); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">${model.model_name}</h4>
+                <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">${getModelDisplayName(model.model_name)}</h4>
                 <div style="display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-size: 0.875rem;">
                     <div><span style="color: var(--text-secondary);">Test Profit:</span> <strong>$${testMetrics.net_profit_dollars?.toFixed(2) || 'N/A'}</strong></div>
                     <div><span style="color: var(--text-secondary);">Test Trades:</span> <strong>${testMetrics.num_trades || 'N/A'}</strong></div>
@@ -479,13 +530,17 @@ function renderComparisonCharts(data) {
     const models = data.models;
     const vizData = data.visualization_data;
     
-    // Color palette for models
+    // Color palette for models - distinct colors for all v2 models
     const modelColors = {
-        'ESPN (default)': '#7c3aed',
-        'logreg_platt': '#ef4444',
-        'logreg_isotonic': '#f59e0b',
-        'catboost_platt': '#10b981',
-        'catboost_isotonic': '#3b82f6'
+        'ESPN (default)': '#7c3aed',  // Purple
+        'catboost_baseline_isotonic_v2': '#3b82f6',  // Blue
+        'catboost_baseline_platt_v2': '#60a5fa',  // Light Blue
+        'catboost_baseline_no_interaction_isotonic_v2': '#10b981',  // Green
+        'catboost_baseline_no_interaction_platt_v2': '#34d399',  // Light Green
+        'catboost_odds_isotonic_v2': '#f59e0b',  // Orange
+        'catboost_odds_platt_v2': '#fbbf24',  // Light Orange
+        'catboost_odds_no_interaction_isotonic_v2': '#ef4444',  // Red
+        'catboost_odds_no_interaction_platt_v2': '#f87171'  // Light Red
     };
     
     // Render marginal effects chart
@@ -525,7 +580,7 @@ function renderMarginalEffectsComparison(models, vizData, modelColors) {
         // Entry threshold marginal effects
         if (marginal.entry && marginal.entry.thresholds && marginal.entry.mean) {
             datasets.push({
-                label: `${model.model_name} - Entry`,
+                label: `${getModelDisplayName(model.model_name)} - Entry`,
                 data: marginal.entry.thresholds.map((t, i) => ({
                     x: t,
                     y: marginal.entry.mean[i]
@@ -541,7 +596,7 @@ function renderMarginalEffectsComparison(models, vizData, modelColors) {
         // Exit threshold marginal effects
         if (marginal.exit && marginal.exit.thresholds && marginal.exit.mean) {
             datasets.push({
-                label: `${model.model_name} - Exit`,
+                label: `${getModelDisplayName(model.model_name)} - Exit`,
                 data: marginal.exit.thresholds.map((t, i) => ({
                     x: t,
                     y: marginal.exit.mean[i]
@@ -635,7 +690,7 @@ function renderTradeoffScatterComparison(models, vizData, modelColors) {
         
         if (scatter.num_trades && scatter.net_profit) {
             datasets.push({
-                label: model.model_name,
+                label: getModelDisplayName(model.model_name),
                 data: scatter.num_trades.map((trades, i) => ({
                     x: trades,
                     y: scatter.net_profit[i]
@@ -768,13 +823,33 @@ async function exportGridSearchComparisonToHTML() {
                 // Use exportedGridSearchComparisonData directly to avoid redeclaration
                 const comparisonData = window.exportedGridSearchComparisonData;
                 
-                // Color palette for models
+                // Map technical model names to readable display names
+                function getModelDisplayName(modelName) {
+                    const modelNameMap = {
+                        'catboost_baseline_isotonic_v2': 'Baseline w/ Interaction Terms Isotonic',
+                        'catboost_baseline_platt_v2': 'Baseline w/ Interaction Terms Platt',
+                        'catboost_baseline_no_interaction_isotonic_v2': 'Baseline w/o Interaction Terms Isotonic',
+                        'catboost_baseline_no_interaction_platt_v2': 'Baseline w/o Interaction Terms Platt',
+                        'catboost_odds_isotonic_v2': 'Odds w/ Interaction Terms Isotonic',
+                        'catboost_odds_platt_v2': 'Odds w/ Interaction Terms Platt',
+                        'catboost_odds_no_interaction_isotonic_v2': 'Odds w/o Interaction Terms Isotonic',
+                        'catboost_odds_no_interaction_platt_v2': 'Odds w/o Interaction Terms Platt',
+                        'ESPN (default)': 'ESPN (default)'
+                    };
+                    return modelNameMap[modelName] || modelName;
+                }
+                
+                // Color palette for models - distinct colors for all v2 models
                 const modelColors = {
-                    'ESPN (default)': '#7c3aed',
-                    'logreg_platt': '#ef4444',
-                    'logreg_isotonic': '#f59e0b',
-                    'catboost_platt': '#10b981',
-                    'catboost_isotonic': '#3b82f6'
+                    'ESPN (default)': '#7c3aed',  // Purple
+                    'catboost_baseline_isotonic_v2': '#3b82f6',  // Blue
+                    'catboost_baseline_platt_v2': '#60a5fa',  // Light Blue
+                    'catboost_baseline_no_interaction_isotonic_v2': '#10b981',  // Green
+                    'catboost_baseline_no_interaction_platt_v2': '#34d399',  // Light Green
+                    'catboost_odds_isotonic_v2': '#f59e0b',  // Orange
+                    'catboost_odds_platt_v2': '#fbbf24',  // Light Orange
+                    'catboost_odds_no_interaction_isotonic_v2': '#ef4444',  // Red
+                    'catboost_odds_no_interaction_platt_v2': '#f87171'  // Light Red
                 };
                 
                 // Initialize charts when page loads
@@ -794,7 +869,7 @@ async function exportGridSearchComparisonToHTML() {
                             
                             if (marginal.entry && marginal.entry.thresholds && marginal.entry.mean) {
                                 datasets.push({
-                                    label: model.model_name + ' - Entry',
+                                    label: getModelDisplayName(model.model_name) + ' - Entry',
                                     data: marginal.entry.thresholds.map((t, i) => ({ x: t, y: marginal.entry.mean[i] })),
                                     borderColor: color,
                                     backgroundColor: color + '40',
@@ -806,7 +881,7 @@ async function exportGridSearchComparisonToHTML() {
                             
                             if (marginal.exit && marginal.exit.thresholds && marginal.exit.mean) {
                                 datasets.push({
-                                    label: model.model_name + ' - Exit',
+                                    label: getModelDisplayName(model.model_name) + ' - Exit',
                                     data: marginal.exit.thresholds.map((t, i) => ({ x: t, y: marginal.exit.mean[i] })),
                                     borderColor: color,
                                     backgroundColor: color + '40',
@@ -854,7 +929,7 @@ async function exportGridSearchComparisonToHTML() {
                             
                             if (scatter.num_trades && scatter.net_profit) {
                                 datasets.push({
-                                    label: model.model_name,
+                                    label: getModelDisplayName(model.model_name),
                                     data: scatter.num_trades.map((trades, i) => ({ x: trades, y: scatter.net_profit[i] })),
                                     borderColor: color,
                                     backgroundColor: color + '80',
@@ -1046,7 +1121,7 @@ async function exportGridSearchComparisonToHTML() {
                                 
                                 // Add click handler to the new canvas
                                 newCanvas.addEventListener('click', function() {
-                                    openHeatmapModal(heatmapData, model.model_name + ' - ' + titleSuffix, globalScale);
+                                    openHeatmapModal(heatmapData, getModelDisplayName(model.model_name) + ' - ' + titleSuffix, globalScale);
                                 });
                                 
                                 // Add "Click to enlarge" hint - remove any existing hints first to avoid duplicates

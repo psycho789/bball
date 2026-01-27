@@ -1,7 +1,7 @@
 # Sprint 1: Pre-Game Odds Model Integration - CatBoost Implementation
 
 **Date**: Thu Jan 15 06:23:31 PST 2026  
-**Sprint Duration**: 5 days (12-14 hours total)  
+**Sprint Duration**: 5 days (13-15 hours total)  
 **Sprint Goal**: Integrate opening sportsbook odds into CatBoost win-probability model training pipeline, enabling models to leverage pre-game market consensus for improved prediction accuracy. Success criteria: (1) Opening odds features added to `build_design_matrix()` and training scripts, (2) Models train successfully with opening odds (handling NULL values), (3) Time-bucketed evaluation shows improved performance in early-game buckets, (4) Feature importance shows opening odds contribute meaningfully.  
 **Current Status**: Opening odds are available in `derived.snapshot_features_v1` (migration 039 completed) but not used in model training. Training scripts (`train_winprob_catboost.py`, `train_winprob_logreg.py`) query ESPN tables directly, bypassing canonical dataset. `build_design_matrix()` function in `scripts/lib/_winprob_lib.py` does not accept opening odds parameters.  
 **Target Status**: CatBoost model training pipeline includes opening odds features (de-vigged fair probabilities, overround, spread, total, missingness indicators). Models train successfully with opening odds, showing improved Brier score and log-loss on test set, especially in early-game time buckets (2880-2400s, 2400-1800s). Feature importance analysis shows opening odds features in top 50% of feature importance.  
@@ -105,10 +105,10 @@
 **Dependencies**: Database access via `DATABASE_URL`, understanding of ESPN-direct training query structure
 **Deliverables**: Parity validation report with game/snapshot counts per season, distribution comparison, and go/no-go decision
 
-### Phase 2: Feature Engineering Implementation (Duration: 2-3 hours)
-**Objective**: Implement opening odds feature engineering (de-vigging with safety checks, missingness indicators) in training data loading function.
+### Phase 2: Feature Engineering Implementation (Duration: 3-4 hours)
+**Objective**: Validate odds format, create shared de-vigging helper function, and implement opening odds feature engineering in training data loading function.
 **Dependencies**: Phase 1 complete (parity validated), understanding of opening odds data structure
-**Deliverables**: Modified `_load_training_data()` function with opening odds feature engineering, de-vigging logic with safety checks
+**Deliverables**: Odds format validation report, shared `compute_opening_odds_features()` helper function, modified `_load_training_data()` function using helper
 
 ### Phase 3: Design Matrix and Training Integration (Duration: 4-5 hours)
 **Objective**: Integrate opening odds features into `build_design_matrix()`, CatBoost training pipeline, and pre-computation script.
@@ -152,6 +152,8 @@
   - [ ] Game count parity verified (within 5% difference per season)
   - [ ] Snapshot count parity verified (within 5% difference per season)
   - [ ] Time bucket distribution comparison shows similar distributions
+  - [ ] **Label parity verified**: Random sample of 100+ snapshots shows `home_win` label matches between sources (100% match required)
+  - [ ] **Feature parity verified**: Random sample shows core features match within tolerance (`point_differential` ±1, `time_remaining` ±1 second, `possession` exact match)
   - [ ] Go/no-go decision documented with rationale
 
 - **Technical Context**:
@@ -179,10 +181,18 @@
      - File: Execute in psql session
      - Action: Run distribution queries for both data sources
      - Expected: Similar distributions across time buckets
-  6. **Document Decision**: Create parity validation report with go/no-go decision
+  6. **Verify Label Parity**: Sample random snapshots and compare labels
+     - File: Execute in psql session
+     - Action: Query 100+ random snapshots from both sources, join on `(game_id, sequence_number, snapshot_timestamp)` or equivalent, compare `home_win` labels
+     - Expected: 100% label match (all sampled snapshots have identical `home_win` values)
+  7. **Verify Feature Parity**: Sample random snapshots and compare core features
+     - File: Execute in psql session
+     - Action: Query same random snapshots, compare `point_differential`, `time_remaining`, `possession`
+     - Expected: `point_differential` matches within ±1, `time_remaining` matches within ±1 second, `possession` exact match
+  8. **Document Decision**: Create parity validation report with go/no-go decision
      - File: `parity-validation-report.md`
-     - Action: Document decision and rationale
-     - Content: If parity passes (>95% match), proceed with Option A (canonical dataset). If parity fails, use Option B (join ESPN tables with opening odds).
+     - Action: Document decision and rationale, include label/feature parity results
+     - Content: If parity passes (>95% match on counts, 100% label match, feature match within tolerance), proceed with Option A (canonical dataset). If parity fails, use Option B (join ESPN tables with opening odds).
 
 - **Validation Steps**:
   1. **Verify Queries Execute**: `source .env && psql "$DATABASE_URL" -c "[Q3a query]"` - Expected: No errors, returns results
@@ -192,6 +202,8 @@
 - **Definition of Done**:
   - [ ] All parity validation queries executed successfully
   - [ ] Parity validation report created with exact counts and percentage differences
+  - [ ] Label parity verified (100% match on sampled snapshots)
+  - [ ] Feature parity verified (core features match within tolerance)
   - [ ] Go/no-go decision documented with clear rationale
   - [ ] If parity passes, proceed to Phase 2. If parity fails, document Option B approach.
 
@@ -209,29 +221,161 @@
 
 ### Epic 2: Opening Odds Feature Engineering
 **Priority**: High (core functionality)
-**Estimated Time**: 2-3 hours (1 hour design review, 1-2 hours implementation)
+**Estimated Time**: 3-4 hours (1 hour odds format validation, 1 hour design review, 1-2 hours implementation)
 **Dependencies**: Epic 1 complete (parity validated)
 **Status**: Not Started
 **Phase Assignment**: Phase 2
 
-#### Story 2.1: Implement Opening Odds Feature Engineering in Training Data Loading
+#### Story 2.1: Validate Opening Odds Format and Document Conversion Logic
 - **ID**: S1-E2-S1
-- **Type**: Feature
-- **Priority**: High (core functionality - required for model integration)
-- **Estimate**: 2-3 hours (30 min design review, 1-2 hours implementation, 30 min testing)
+- **Type**: Research/Validation
+- **Priority**: Critical (blocking - must validate odds format before implementing de-vigging)
+- **Estimate**: 1 hour (30 min database query, 30 min documentation)
 - **Phase**: Phase 2
 - **Prerequisites**: S1-E1-S1 (parity validation complete)
-- **Files to Modify**: `scripts/model/train_winprob_catboost.py` (modify `_load_training_data()` function)
+- **Files to Modify**: None (validation only)
+- **Files to Create**: `cursor-files/sprints/2026-01-15-pregame-odds-model-integration/odds-format-validation.md` (validation results)
+- **Dependencies**: Database access via `DATABASE_URL`, understanding of odds formats
+
+- **Acceptance Criteria** (MUST be technically testable):
+  - [ ] Database query executed to inspect `opening_moneyline_home` and `opening_moneyline_away` values
+  - [ ] Odds format determined (decimal vs American)
+  - [ ] Sample values documented (e.g., decimal: 1.85, 2.10 vs American: +120, -140)
+  - [ ] Conversion logic documented (decimal: `p = 1/odds` vs American: `p = 100/(odds+100)` for positive, `p = |odds|/(|odds|+100)` for negative)
+  - [ ] Validation report created with format determination and conversion formulas
+
+- **Technical Context**:
+  - **Current State**: Column names say "moneyline" which often implies American odds, but de-vigging math assumes decimal odds (`p = 1/odds`). This is a critical bug risk.
+  - **Required Changes**: Query database to inspect actual values, determine format, document conversion logic.
+  - **Integration Points**: Results inform de-vigging implementation (S1-E2-S2)
+  - **Data Structures**: Query results showing sample odds values
+  - **API Contracts**: N/A (validation only)
+
+- **Implementation Steps**:
+  1. **Query Database for Sample Odds**: Inspect actual values in database
+     - File: Execute in psql session
+     - Action: `SELECT opening_moneyline_home, opening_moneyline_away FROM derived.snapshot_features_v1 WHERE opening_moneyline_home IS NOT NULL LIMIT 100;`
+     - Expected: Returns sample odds values
+  2. **Determine Format**: Analyze sample values
+     - File: Analysis of query results
+     - Action: Check if values are decimal (1.0-10.0 range, e.g., 1.85, 2.10) or American (typically -200 to +200 range, e.g., -140, +120)
+     - Expected: Format clearly identified
+  3. **Document Conversion Logic**: Write conversion formulas
+     - File: `odds-format-validation.md`
+     - Action: Document format determination and conversion formulas
+     - Content: If decimal: `p = 1/odds`. If American: positive odds `p = 100/(odds+100)`, negative odds `p = |odds|/(|odds|+100)`
+  4. **Create Validation Report**: Document findings
+     - File: `odds-format-validation.md`
+     - Action: Create report with format determination, sample values, conversion formulas
+     - Content: Format determination, sample values, conversion logic, implementation notes
+
+- **Validation Steps**:
+  1. **Verify Query Executes**: `source .env && psql "$DATABASE_URL" -c "SELECT opening_moneyline_home, opening_moneyline_away FROM derived.snapshot_features_v1 WHERE opening_moneyline_home IS NOT NULL LIMIT 10;"` - Expected: Returns sample values
+  2. **Verify Validation Report Exists**: `test -f cursor-files/sprints/2026-01-15-pregame-odds-model-integration/odds-format-validation.md` - Expected: File exists
+  3. **Verify Format Determined**: `grep -q "decimal\|American" cursor-files/sprints/2026-01-15-pregame-odds-model-integration/odds-format-validation.md` - Expected: Format clearly stated
+
+- **Definition of Done**:
+  - [ ] Database query executed and sample values inspected
+  - [ ] Odds format determined (decimal or American)
+  - [ ] Conversion logic documented
+  - [ ] Validation report created
+  - [ ] All validation steps pass
+
+- **Rollback Plan**: N/A (validation only, no code changes)
+
+- **Risk Assessment**: 
+  - **Risk**: Odds are American format but de-vigging uses decimal conversion (would silently train wrong)
+  - **Mitigation**: Validate format before implementing de-vigging, use correct conversion formula
+  - **Contingency**: If American format, update all de-vigging logic to use American conversion
+
+- **Success Metrics**:
+  - **Completeness**: Format clearly determined and documented
+  - **Accuracy**: Conversion formulas correct for determined format
+  - **Clarity**: Validation report provides clear guidance for implementation
+
+#### Story 2.2: Create Shared De-Vigging Helper Function
+- **ID**: S1-E2-S2
+- **Type**: Feature
+- **Priority**: High (core functionality - prevents code duplication)
+- **Estimate**: 1 hour (30 min implementation, 30 min testing)
+- **Phase**: Phase 2
+- **Prerequisites**: S1-E2-S1 (odds format validated)
+- **Files to Modify**: `scripts/lib/_winprob_lib.py` (add `compute_opening_odds_features()` helper function)
 - **Files to Create**: None
-- **Dependencies**: Analysis document (feature engineering formulas), numpy, pandas
+- **Dependencies**: S1-E2-S1 (odds format validation), numpy
+
+- **Acceptance Criteria** (MUST be technically testable):
+  - [ ] `compute_opening_odds_features()` function created in `scripts/lib/_winprob_lib.py`
+  - [ ] Function accepts opening odds (moneyline_home, moneyline_away, spread, total) as inputs
+  - [ ] Function returns engineered features: `opening_prob_home_fair`, `opening_overround`, `has_opening_moneyline`, `has_opening_spread`, `has_opening_total`
+  - [ ] Function uses correct odds conversion (decimal or American based on S1-E2-S1 validation)
+  - [ ] Function includes safety checks (only compute if both odds present and valid)
+  - [ ] Function handles NULL values gracefully (returns NaNs for missing values)
+  - [ ] Function tested with known odds values (verifies de-vigging math)
+
+- **Technical Context**:
+  - **Current State**: De-vigging logic planned to be duplicated in `train_winprob_catboost.py` and `precompute_model_probabilities.py`.
+  - **Required Changes**: Create shared helper function in `scripts/lib/_winprob_lib.py` to prevent code drift.
+  - **Integration Points**: Called by training script (S1-E3-S2) and pre-computation script (S1-E3-S3)
+  - **Data Structures**: Input: scalar or array values for odds. Output: dictionary or tuple of engineered features
+  - **API Contracts**: Function signature: `compute_opening_odds_features(opening_moneyline_home, opening_moneyline_away, opening_spread=None, opening_total=None) -> dict`
+
+- **Implementation Steps**:
+  1. **Review Odds Format Validation**: Check format determination from S1-E2-S1
+     - File: `odds-format-validation.md`
+     - Action: Read format determination and conversion formulas
+     - Content: Use correct conversion based on format (decimal vs American)
+  2. **Create Helper Function**: Implement `compute_opening_odds_features()` in `_winprob_lib.py`
+     - File: `scripts/lib/_winprob_lib.py`
+     - Action: Add function with de-vigging logic and safety checks
+     - Content: Function accepts odds, returns engineered features with proper conversion
+  3. **Add Unit Tests**: Test function with known odds values
+     - File: Test script or unit test
+     - Action: Test with known decimal odds (e.g., 1.85, 2.10) or American odds (e.g., -140, +120)
+     - Expected: De-vigged probabilities match expected values
+
+- **Validation Steps**:
+  1. **Verify Function Exists**: `python -c "from scripts.lib._winprob_lib import compute_opening_odds_features; print(compute_opening_odds_features)"` - Expected: Function exists
+  2. **Verify Function Signature**: `python -c "from scripts.lib._winprob_lib import compute_opening_odds_features; import inspect; print(inspect.signature(compute_opening_odds_features))"` - Expected: Function signature matches expected
+  3. **Verify De-Vigging Math**: Test with known odds values - Expected: De-vigged probabilities correct
+
+- **Definition of Done**:
+  - [ ] Helper function created in `_winprob_lib.py`
+  - [ ] Function uses correct odds conversion (based on format validation)
+  - [ ] Function includes safety checks
+  - [ ] Function tested with known values
+  - [ ] All validation steps pass
+
+- **Rollback Plan**: Revert changes to `_winprob_lib.py` if errors occur
+
+- **Risk Assessment**: 
+  - **Risk**: Wrong odds conversion formula used
+  - **Mitigation**: Use format validation from S1-E2-S1, test with known values
+  - **Contingency**: Fix conversion formula if tests fail
+
+- **Success Metrics**:
+  - **Functionality**: Function correctly computes de-vigged features
+  - **Correctness**: De-vigging math verified with known values
+  - **Reusability**: Function can be called from both training and pre-computation scripts
+
+#### Story 2.3: Implement Opening Odds Feature Engineering in Training Data Loading
+- **ID**: S1-E2-S3
+- **Type**: Feature
+- **Priority**: High (core functionality - required for model integration)
+- **Estimate**: 1-2 hours (30 min implementation, 30 min testing)
+- **Phase**: Phase 2
+- **Prerequisites**: S1-E2-S2 (shared helper function created)
+- **Files to Modify**: `scripts/model/train_winprob_catboost.py` (modify `_load_training_data()` function to call helper)
+- **Files to Create**: None
+- **Dependencies**: S1-E2-S2 (shared helper function), numpy, pandas
 
 - **Acceptance Criteria** (MUST be technically testable):
   - [ ] `_load_training_data()` function loads opening odds from canonical dataset (or joins with opening odds if Option B)
-  - [ ] De-vigging logic implemented with safety checks (only compute if both odds present and > 1.0)
+  - [ ] Function calls `compute_opening_odds_features()` helper (from S1-E2-S2) for each row or vectorized
   - [ ] `opening_prob_home_fair` column created (de-vigged fair probability, may contain NaNs)
   - [ ] `opening_overround` column created (vig amount, may contain NaNs)
   - [ ] Missingness indicator flags created: `has_opening_moneyline`, `has_opening_spread`, `has_opening_total`
-  - [ ] `has_opening_moneyline` matches `valid_ml` condition (both sides present and >1.0)
+  - [ ] `has_opening_moneyline` matches `valid_ml` condition (both sides present and valid)
   - [ ] Function returns DataFrame with opening odds features included
   - [ ] No errors when opening odds are NULL (handles missing values gracefully)
 
@@ -240,60 +384,25 @@
   - **Required Changes**: 
     - If parity passes: Modify query to use `derived.snapshot_features_v1` instead of ESPN tables directly
     - If parity fails: Join ESPN tables with `external.sportsbook_odds_snapshots` by `game_id` and date
-    - Add de-vigging logic with safety checks (from analysis Appendix A)
-    - Add missingness indicator flags
-  - **Integration Points**: Output DataFrame feeds into `build_design_matrix()` (Phase 3)
+    - Call `compute_opening_odds_features()` helper (from S1-E2-S2) to compute engineered features
+  - **Integration Points**: Output DataFrame feeds into `build_design_matrix()` (Phase 3), uses helper function from S1-E2-S2
   - **Data Structures**: DataFrame columns: `opening_moneyline_home`, `opening_moneyline_away`, `opening_spread`, `opening_total` (from canonical dataset), plus engineered features: `opening_prob_home_fair`, `opening_overround`, `has_opening_moneyline`, `has_opening_spread`, `has_opening_total`
   - **API Contracts**: Function signature unchanged, returns DataFrame with additional columns
 
 - **Implementation Steps**:
-  1. **Review Feature Engineering Design**: Review analysis Appendix A (de-vigging formulas, safety checks)
-     - File: `cursor-files/analysis/2026-01-13-pregame-odds-model-integration/pregame_odds_model_integration_analysis.md`
-     - Action: Review de-vigging implementation (lines 1892-1915)
-     - Content: Understand safety checks, valid_ml condition, missingness flags
+  1. **Import Helper Function**: Import `compute_opening_odds_features()` from `_winprob_lib`
+     - File: `scripts/model/train_winprob_catboost.py`
+     - Action: Add import statement
+     - Content: `from scripts.lib._winprob_lib import compute_opening_odds_features`
   2. **Modify Data Loading Query**: Update `_load_training_data()` to include opening odds
      - File: `scripts/model/train_winprob_catboost.py`
      - Action: Modify SQL query or DataFrame join to include opening odds columns
      - Content: If Option A (parity passed): Query `derived.snapshot_features_v1`. If Option B (parity failed): Join ESPN tables with `external.sportsbook_odds_snapshots` filtered for `is_opening_line = TRUE`
-  3. **Implement De-Vigging Logic**: Add de-vigging with safety checks
+  3. **Call Helper Function**: Apply `compute_opening_odds_features()` to compute engineered features
      - File: `scripts/model/train_winprob_catboost.py`
-     - Action: Add code after data loading (before returning DataFrame)
-     - Content: 
-       ```python
-       import numpy as np
-       
-       # Initialize features with NaNs
-       df['opening_prob_home_fair'] = np.nan
-       df['opening_overround'] = np.nan
-       
-       # Safety check: Only compute de-vigging if both odds present and valid (> 1.0)
-       valid_ml = (
-           df['opening_moneyline_home'].notna()
-           & df['opening_moneyline_away'].notna()
-           & (df['opening_moneyline_home'] > 1.0)
-           & (df['opening_moneyline_away'] > 1.0)
-       )
-       
-       # Step 1: Raw implied probabilities (only for valid odds)
-       p_home_raw = 1.0 / df.loc[valid_ml, 'opening_moneyline_home']
-       p_away_raw = 1.0 / df.loc[valid_ml, 'opening_moneyline_away']
-       den = p_home_raw + p_away_raw
-       
-       # Step 2: Calculate overround (vig) and de-vig to fair probabilities
-       df.loc[valid_ml, 'opening_overround'] = den - 1.0
-       df.loc[valid_ml, 'opening_prob_home_fair'] = p_home_raw / den
-       ```
-  4. **Add Missingness Indicator Flags**: Create binary flags for missing values
-     - File: `scripts/model/train_winprob_catboost.py`
-     - Action: Add code after de-vigging logic
-     - Content:
-       ```python
-       # Missingness indicators (for CatBoost - keep NaNs, don't impute)
-       df['has_opening_moneyline'] = valid_ml.astype(int)
-       df['has_opening_spread'] = df['opening_spread'].notna().astype(int)
-       df['has_opening_total'] = df['opening_total'].notna().astype(int)
-       ```
-  5. **Test with Sample Data**: Verify function works with NULL opening odds
+     - Action: Call helper function (vectorized or row-wise) after data loading
+     - Content: Apply helper function to compute `opening_prob_home_fair`, `opening_overround`, `has_opening_moneyline`, `has_opening_spread`, `has_opening_total`
+  4. **Test with Sample Data**: Verify function works with NULL opening odds
      - File: Test script or interactive Python session
      - Action: Call `_load_training_data()` with sample parameters
      - Expected: Returns DataFrame with opening odds features, handles NULL values without errors
@@ -306,8 +415,8 @@
 
 - **Definition of Done**:
   - [ ] `_load_training_data()` modified to include opening odds
-  - [ ] De-vigging logic implemented with safety checks
-  - [ ] Missingness indicator flags created
+  - [ ] Helper function `compute_opening_odds_features()` called (from S1-E2-S2)
+  - [ ] Opening odds features added to DataFrame
   - [ ] Function returns DataFrame with opening odds features
   - [ ] No errors when opening odds are NULL
   - [ ] All validation steps pass
@@ -315,40 +424,41 @@
 - **Rollback Plan**: Revert changes to `train_winprob_catboost.py` if errors occur, restore original `_load_training_data()` function
 
 - **Risk Assessment**: 
-  - **Risk**: De-vigging logic produces NaNs/inf for invalid odds
-  - **Mitigation**: Safety checks ensure only valid odds (> 1.0, both sides present) are processed
-  - **Contingency**: Add additional validation to catch edge cases
+  - **Risk**: Helper function not called correctly
+  - **Mitigation**: Use helper function from S1-E2-S2 (already tested), verify function call
+  - **Contingency**: Debug helper function call if errors occur
 
 - **Success Metrics**:
-  - **Functionality**: Function successfully loads opening odds and creates engineered features
-  - **Correctness**: De-vigging produces fair probabilities in [0, 1] range
+  - **Functionality**: Function successfully loads opening odds and creates engineered features using helper
+  - **Correctness**: De-vigging produces fair probabilities in [0, 1] range (verified by helper function)
   - **Robustness**: Handles NULL values without errors
 
 ### Epic 3: Design Matrix and Training Integration
 **Priority**: High (core functionality)
-**Estimated Time**: 4-5 hours (1 hour design matrix, 2-3 hours training script, 1 hour testing)
+**Estimated Time**: 4-5 hours (1 hour design matrix + canonical feature list, 2-3 hours training script, 1 hour testing)
 **Dependencies**: Epic 2 complete
 **Status**: Not Started
 **Phase Assignment**: Phase 3
 
-#### Story 3.1: Add Opening Odds Parameters to build_design_matrix()
+#### Story 3.1: Add Opening Odds Parameters to build_design_matrix() and Define Canonical Feature List
 - **ID**: S1-E3-S1
 - **Type**: Feature
 - **Priority**: High (required for model training)
 - **Estimate**: 1 hour (30 min implementation, 30 min testing)
 - **Phase**: Phase 3
-- **Prerequisites**: S1-E2-S1 (feature engineering complete)
+- **Prerequisites**: S1-E2-S3 (feature engineering complete)
 - **Files to Modify**: `scripts/lib/_winprob_lib.py` (modify `build_design_matrix()` function)
 - **Files to Create**: None
 - **Dependencies**: numpy, existing `build_design_matrix()` function
 
 - **Acceptance Criteria** (MUST be technically testable):
+  - [ ] `ODDS_FEATURES` constant defined in `_winprob_lib.py` with canonical feature list: `['opening_prob_home_fair', 'opening_overround', 'opening_spread', 'opening_total', 'has_opening_moneyline', 'has_opening_spread', 'has_opening_total']`
   - [ ] `build_design_matrix()` function signature includes opening odds parameters (all optional, default None)
   - [ ] Function accepts: `opening_prob_home_fair`, `opening_overround`, `opening_spread`, `opening_total`, `has_opening_moneyline`, `has_opening_spread`, `has_opening_total`
-  - [ ] Function includes opening odds features in design matrix when provided
+  - [ ] Function includes opening odds features in design matrix when provided (always in same order as `ODDS_FEATURES`)
   - [ ] Function handles NaNs correctly (CatBoost will handle missing values)
   - [ ] Function maintains backward compatibility (works without opening odds parameters)
-  - [ ] Feature names included in `feature_names` list (for interpretability)
+  - [ ] Feature names included in `feature_names` list in canonical order (for interpretability)
 
 - **Technical Context**:
   - **Current State**: `build_design_matrix()` in `scripts/lib/_winprob_lib.py` accepts base features and optional interaction terms, does not include opening odds.
@@ -362,7 +472,23 @@
      - File: `scripts/lib/_winprob_lib.py`
      - Action: Read function (lines 183-210 from analysis)
      - Content: Understand current structure, feature scaling, feature names
-  2. **Add Opening Odds Parameters**: Extend function signature
+  2. **Define Canonical Feature List**: Create `ODDS_FEATURES` constant
+     - File: `scripts/lib/_winprob_lib.py`
+     - Action: Define constant at module level
+     - Content:
+       ```python
+       # Canonical opening odds feature names (always in this order)
+       ODDS_FEATURES = [
+           'opening_prob_home_fair',
+           'opening_overround',
+           'opening_spread',
+           'opening_total',
+           'has_opening_moneyline',
+           'has_opening_spread',
+           'has_opening_total',
+       ]
+       ```
+  3. **Add Opening Odds Parameters**: Extend function signature
      - File: `scripts/lib/_winprob_lib.py`
      - Action: Add optional parameters to function signature
      - Content:
@@ -384,14 +510,14 @@
            has_opening_total: np.ndarray | None = None,
        ) -> np.ndarray:
        ```
-  3. **Add Opening Odds to Design Matrix**: Include features when provided
+  4. **Add Opening Odds to Design Matrix**: Include features when provided (in canonical order)
      - File: `scripts/lib/_winprob_lib.py`
-     - Action: Add opening odds features to design matrix construction
-     - Content: Append opening odds features to design matrix (no scaling needed for CatBoost, but can normalize if desired)
-  4. **Update Feature Names**: Add opening odds feature names to list
+     - Action: Add opening odds features to design matrix construction, always in `ODDS_FEATURES` order
+     - Content: Append opening odds features to design matrix in canonical order (no scaling needed for CatBoost, but can normalize if desired). If any odds feature is provided, add all of them (with NaNs if missing) to maintain stable shape.
+  5. **Update Feature Names**: Add opening odds feature names to list in canonical order
      - File: `scripts/lib/_winprob_lib.py`
-     - Action: Update `feature_names` list (if maintained)
-     - Content: Add `'opening_prob_home_fair'`, `'opening_overround'`, `'opening_spread'`, `'opening_total'`, `'has_opening_moneyline'`, `'has_opening_spread'`, `'has_opening_total'`
+     - Action: Update `feature_names` list (if maintained), use `ODDS_FEATURES` constant
+     - Content: Add features from `ODDS_FEATURES` constant in canonical order
   5. **Test Backward Compatibility**: Verify function works without opening odds
      - File: Test script
      - Action: Call `build_design_matrix()` without opening odds parameters
@@ -403,9 +529,10 @@
   3. **Verify Backward Compatibility**: Test without opening odds parameters - Expected: Design matrix shape unchanged, function works as before
 
 - **Definition of Done**:
+  - [ ] `ODDS_FEATURES` constant defined with canonical feature list
   - [ ] Function signature includes opening odds parameters
-  - [ ] Opening odds features included in design matrix when provided
-  - [ ] Feature names updated
+  - [ ] Opening odds features included in design matrix when provided (in canonical order)
+  - [ ] Feature names updated (using `ODDS_FEATURES` constant)
   - [ ] Backward compatibility maintained
   - [ ] All validation steps pass
 
@@ -427,10 +554,10 @@
 - **Priority**: High (required for model training with opening odds)
 - **Estimate**: 2-3 hours (1.5 hours implementation, 1 hour testing)
 - **Phase**: Phase 3
-- **Prerequisites**: S1-E3-S1 (build_design_matrix updated)
-- **Files to Modify**: `scripts/model/train_winprob_catboost.py` (modify training function to pass opening odds to build_design_matrix, update feature_names list, update calibration set building)
+- **Prerequisites**: S1-E3-S1 (build_design_matrix updated, ODDS_FEATURES constant defined)
+- **Files to Modify**: `scripts/model/train_winprob_catboost.py` (modify training function to pass opening odds to build_design_matrix, update feature_names list using ODDS_FEATURES constant, update calibration set building)
 - **Files to Create**: None
-- **Dependencies**: S1-E2-S1 (feature engineering complete), S1-E3-S1 (build_design_matrix updated)
+- **Dependencies**: S1-E2-S3 (feature engineering complete), S1-E3-S1 (build_design_matrix updated, ODDS_FEATURES constant)
 
 - **Acceptance Criteria** (MUST be technically testable):
   - [ ] Training function passes opening odds features to `build_design_matrix()` for training set
@@ -481,26 +608,16 @@
      - File: `scripts/model/train_winprob_catboost.py`
      - Action: Add opening odds features to `calib_matrix_kwargs` dictionary (after line 448, before `X_calib = build_design_matrix(**calib_matrix_kwargs)`)
      - Content: Same pattern as step 2, but using `calib_mask` instead of `train_mask`
-  4. **Update feature_names List**: Add opening odds feature names to `feature_names` list
+  4. **Update feature_names List**: Add opening odds feature names using `ODDS_FEATURES` constant
      - File: `scripts/model/train_winprob_catboost.py`
-     - Action: Add opening odds feature names after interaction term feature names (after line 412)
+     - Action: Import `ODDS_FEATURES` from `_winprob_lib`, add feature names in canonical order (after line 412)
      - Content:
        ```python
-       # Add opening odds feature names if available
-       if "opening_prob_home_fair" in df.columns:
-           feature_names.append("opening_prob_home_fair")
-       if "opening_overround" in df.columns:
-           feature_names.append("opening_overround")
-       if "opening_spread" in df.columns:
-           feature_names.append("opening_spread")
-       if "opening_total" in df.columns:
-           feature_names.append("opening_total")
-       if "has_opening_moneyline" in df.columns:
-           feature_names.append("has_opening_moneyline")
-       if "has_opening_spread" in df.columns:
-           feature_names.append("has_opening_spread")
-       if "has_opening_total" in df.columns:
-           feature_names.append("has_opening_total")
+       from scripts.lib._winprob_lib import ODDS_FEATURES
+       
+       # Add opening odds feature names if any odds column exists (use canonical order)
+       if any(col in df.columns for col in ODDS_FEATURES):
+           feature_names.extend(ODDS_FEATURES)  # Always add all features in canonical order
        ```
   5. **Test Model Training**: Run training script with opening odds
      - File: `scripts/model/train_winprob_catboost.py`
@@ -541,13 +658,13 @@
 - **Estimate**: 1-2 hours (1 hour implementation, 30 min testing)
 - **Phase**: Phase 3
 - **Prerequisites**: S1-E3-S1 (build_design_matrix updated), S1-E3-S2 (training script updated)
-- **Files to Modify**: `scripts/model/precompute_model_probabilities.py` (update SQL query to include opening odds, update score_snapshot() to compute de-vigging and pass opening odds)
+- **Files to Modify**: `scripts/model/precompute_model_probabilities.py` (update SQL query to include opening odds, update score_snapshot() to call compute_opening_odds_features() helper and pass opening odds)
 - **Files to Create**: None
-- **Dependencies**: S1-E2-S1 (feature engineering complete), S1-E3-S1 (build_design_matrix updated)
+- **Dependencies**: S1-E2-S2 (shared helper function), S1-E3-S1 (build_design_matrix updated)
 
 - **Acceptance Criteria** (MUST be technically testable):
   - [ ] SQL query in `precompute_all()` includes opening odds columns: `opening_moneyline_home`, `opening_moneyline_away`, `opening_spread`, `opening_total`
-  - [ ] `score_snapshot()` function computes de-vigging with safety checks (same logic as training script)
+  - [ ] `score_snapshot()` function calls `compute_opening_odds_features()` helper (from S1-E2-S2)
   - [ ] `score_snapshot()` passes opening odds features to `build_design_matrix()`
   - [ ] Pre-computation script executes successfully with models trained with opening odds
   - [ ] Pre-computation handles NULL opening odds gracefully (no errors)
@@ -571,12 +688,12 @@
      - File: `scripts/model/precompute_model_probabilities.py`
      - Action: Update snapshot dictionary construction (around line 227)
      - Content: Add opening odds columns from query results to snapshot dict
-  3. **Add De-Vigging Logic to score_snapshot()**: Compute de-vigged features with safety checks
+  3. **Call Helper Function in score_snapshot()**: Use `compute_opening_odds_features()` helper
      - File: `scripts/model/precompute_model_probabilities.py`
-     - Action: Add de-vigging logic in `score_snapshot()` function (before calling `build_design_matrix()`)
+     - Action: Import and call helper function in `score_snapshot()` function (before calling `build_design_matrix()`)
      - Content:
        ```python
-       import numpy as np
+       from scripts.lib._winprob_lib import compute_opening_odds_features
        
        # Extract opening odds from snapshot
        opening_moneyline_home = snapshot.get("opening_moneyline_home")
@@ -584,24 +701,13 @@
        opening_spread = snapshot.get("opening_spread")
        opening_total = snapshot.get("opening_total")
        
-       # Initialize features with NaNs
-       opening_prob_home_fair = np.nan
-       opening_overround = np.nan
-       
-       # Safety check: Only compute de-vigging if both odds present and valid (> 1.0)
-       if (opening_moneyline_home is not None and opening_moneyline_away is not None
-           and opening_moneyline_home > 1.0 and opening_moneyline_away > 1.0):
-           p_home_raw = 1.0 / opening_moneyline_home
-           p_away_raw = 1.0 / opening_moneyline_away
-           den = p_home_raw + p_away_raw
-           opening_overround = den - 1.0
-           opening_prob_home_fair = p_home_raw / den
-       
-       # Missingness indicators
-       has_opening_moneyline = 1 if (opening_moneyline_home is not None and opening_moneyline_away is not None
-                                      and opening_moneyline_home > 1.0 and opening_moneyline_away > 1.0) else 0
-       has_opening_spread = 1 if opening_spread is not None else 0
-       has_opening_total = 1 if opening_total is not None else 0
+       # Compute engineered features using shared helper (prevents code drift)
+       odds_features = compute_opening_odds_features(
+           opening_moneyline_home=opening_moneyline_home,
+           opening_moneyline_away=opening_moneyline_away,
+           opening_spread=opening_spread,
+           opening_total=opening_total,
+       )
        ```
   4. **Pass Opening Odds to build_design_matrix()**: Include opening odds in function call
      - File: `scripts/model/precompute_model_probabilities.py`
@@ -620,7 +726,7 @@
 
 - **Definition of Done**:
   - [ ] SQL query includes opening odds columns
-  - [ ] `score_snapshot()` computes de-vigging with safety checks
+  - [ ] `score_snapshot()` calls `compute_opening_odds_features()` helper (from S1-E2-S2)
   - [ ] `score_snapshot()` passes opening odds to `build_design_matrix()`
   - [ ] Pre-computation script executes successfully
   - [ ] Handles NULL opening odds without errors
@@ -657,10 +763,12 @@
 - **Dependencies**: Training scripts, database access
 
 - **Acceptance Criteria** (MUST be technically testable):
+  - [ ] Fixed random seed set for train/test split reproducibility
+  - [ ] Split keys (game_ids) persisted to file: `artifacts/splits/sprint1_split_game_ids.json` (or similar)
   - [ ] Baseline model trained (without opening odds) - can use existing model or retrain
   - [ ] Odds-enabled model trained (with opening odds)
   - [ ] Both model artifacts saved successfully
-  - [ ] Both models use same train/test split for fair comparison
+  - [ ] Both models use same train/test split for fair comparison (verified by split file or same random seed)
   - [ ] Training parameters identical except for opening odds features
 
 - **Technical Context**:
@@ -671,15 +779,27 @@
   - **API Contracts**: Standard CatBoost model training
 
 - **Implementation Steps**:
-  1. **Train Baseline Model**: Train model without opening odds (or use existing baseline)
+  1. **Set Fixed Random Seed**: Ensure train/test split reproducibility
+     - File: `scripts/model/train_winprob_catboost.py` or training script
+     - Action: Set `np.random.seed(42)` or equivalent before train/test split
+     - Expected: Same split generated on each run
+  2. **Persist Split Keys**: Save game_ids for train/test split to file
+     - File: Create `artifacts/splits/sprint1_split_game_ids.json`
+     - Action: After train/test split, save `{'train_game_ids': [...], 'test_game_ids': [...]}` to JSON file
+     - Expected: Split file created with game_ids
+  3. **Train Baseline Model**: Train model without opening odds (or use existing baseline)
      - File: `scripts/model/train_winprob_catboost.py`
-     - Action: Run training script without opening odds (or use existing model)
-     - Expected: Baseline model artifact saved
-  2. **Train Odds-Enabled Model**: Train model with opening odds
+     - Action: Run training script without opening odds (or use existing model), using same random seed
+     - Expected: Baseline model artifact saved, split file created
+  4. **Train Odds-Enabled Model**: Train model with opening odds using same split
      - File: `scripts/model/train_winprob_catboost.py`
-     - Action: Run training script with opening odds (using updated code from S1-E3-S2)
-     - Expected: Odds-enabled model artifact saved
-  3. **Verify Artifacts**: Check that both model artifacts exist
+     - Action: Run training script with opening odds (using updated code from S1-E3-S2), using same random seed or load split file
+     - Expected: Odds-enabled model artifact saved, same train/test split used
+  5. **Verify Split Reproducibility**: Check that both models used same split
+     - File: Compare split files or verify same random seed used
+     - Action: Verify train/test game_ids match between baseline and odds-enabled models
+     - Expected: Same game_ids in train/test sets for both models
+  6. **Verify Artifacts**: Check that both model artifacts exist
      - File: Artifact directory
      - Action: List model artifact files
      - Expected: Both `.cbm` files present
@@ -690,8 +810,11 @@
   3. **Verify Training Logs**: Check training logs for errors - Expected: No errors in training logs
 
 - **Definition of Done**:
+  - [ ] Fixed random seed set for split reproducibility
+  - [ ] Split keys persisted to file (or same random seed used for both models)
   - [ ] Baseline model trained (or existing baseline identified)
   - [ ] Odds-enabled model trained
+  - [ ] Both models use same train/test split (verified)
   - [ ] Both model artifacts saved
   - [ ] Training parameters documented
   - [ ] All validation steps pass
@@ -791,7 +914,7 @@
 - **Priority**: High
 - **Estimate**: 1-2 hours
 - **Phase**: Phase 5 (Sprint Quality Assurance)
-- **Prerequisites**: ALL development stories completed (S1-E1-S1, S1-E2-S1, S1-E3-S1, S1-E3-S2, S1-E3-S3, S1-E4-S1, S1-E4-S2)
+- **Prerequisites**: ALL development stories completed (S1-E1-S1, S1-E2-S1, S1-E2-S2, S1-E2-S3, S1-E3-S1, S1-E3-S2, S1-E3-S3, S1-E4-S1, S1-E4-S2)
 
 - **Acceptance Criteria**:
   - [ ] **Code documentation** updated if code changes were made (docstrings, comments)
@@ -1009,9 +1132,13 @@
 
 ## Risk Assessment
 - **Technical Risks**: 
+  - **CRITICAL**: Wrong odds format conversion (decimal vs American) - Mitigated by Story 2.1 (odds format validation before implementation)
   - Opening odds not available for all games (NULL values) - Mitigated by CatBoost handling missing natively
   - Model performance doesn't improve - Mitigated by evaluation and comparison
   - Parity validation fails - Mitigated by Option B approach (join ESPN tables)
+  - Code drift in de-vigging logic - Mitigated by Story 2.2 (shared helper function)
+  - Feature name ordering inconsistencies - Mitigated by Story 3.1 (ODDS_FEATURES constant)
+  - Train/test split differences between models - Mitigated by Story 4.1 (fixed random seed and split file persistence)
 - **Business Risks**: 
   - Time investment doesn't yield model improvement - Mitigated by data scientist recommendation suggests it will help
 - **Resource Risks**: 

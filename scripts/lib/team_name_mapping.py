@@ -138,11 +138,11 @@ TEAM_NAME_MAPPING = {
     "Pelicans": "NO",
     
     # New York Knicks
-    "ny": "NYK",
-    "nyk": "NYK",
-    "new york": "NYK",
-    "New York Knicks": "NYK",
-    "Knicks": "NYK",
+    "ny": "NY",
+    "nyk": "NY",  # ESPN uses "NY" not "NYK"
+    "new york": "NY",
+    "New York Knicks": "NY",
+    "Knicks": "NY",
     
     # Oklahoma City Thunder
     "okc": "OKC",
@@ -199,13 +199,14 @@ TEAM_NAME_MAPPING = {
     "uta": "UTAH",  # Alternative abbreviation
     "Utah Jazz": "UTAH",
     "Jazz": "UTAH",
+    # Note: ESPN uses "UTAH" (4 chars) - verified in database
     
     # Washington Wizards
-    "wsh": "WAS",
-    "was": "WAS",
-    "washington": "WAS",
-    "Washington Wizards": "WAS",
-    "Wizards": "WAS",
+    "wsh": "WSH",  # ESPN uses "WSH" not "WAS"
+    "was": "WSH",
+    "washington": "WSH",
+    "Washington Wizards": "WSH",
+    "Wizards": "WSH",
 }
 
 
