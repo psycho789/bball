@@ -25,6 +25,17 @@
 - **Finding 3**: When opening odds are missing, odds models use a **50/50 baseline** (0.0 logit) instead of learned opening odds baseline, causing degraded predictions
 - **Finding 4**: **Why the mismatch?** Training data (2017-2023) has **93.6% opening odds coverage**, but games with Kalshi data in 2025-26 have **78.8% coverage** (14.8 percentage point drop). This means 107 games (21.2%) default to 50/50 baseline instead of learned opening odds baseline.
 
+### Missing Opening Odds Breakdown (107 games)
+
+| Category | Count | % of Missing | Reason | Fix |
+|----------|-------|--------------|--------|-----|
+| **Needs View Refresh** | 54 | 50.5% | Odds exist in `external.sportsbook_odds_snapshots` but materialized view not refreshed | `REFRESH MATERIALIZED VIEW CONCURRENTLY derived.snapshot_features_v1;` |
+| **Early Oct Missing (Oct 10-17)** | 42 | 39.3% | CSV file `nba_main_lines.csv` has no data for these dates | Re-scrape or obtain missing data |
+| **Later Dates Truly Missing** | 13 | 12.1% | Games exist in canonical but no opening odds in table | Investigate data collection/mapping |
+| **Total Missing** | 107 | 100% | | |
+
+**After View Refresh**: Coverage would improve to **89.3%** (452/505 games), reducing gap to **4.3 percentage points** (93.6% → 89.3%).
+
 ### Critical Issues Identified
 - **Issue 1**: **Training/Inference Distribution Mismatch** (HIGH) - Models trained on 2017-2023 data (likely higher opening odds coverage) but tested on 2025-26 (44.2% coverage)
 - **Issue 2**: **Baseline Degradation** (HIGH) - Missing opening odds cause baseline to default to 0.0 (50/50) instead of learned opening odds signal
@@ -248,6 +259,142 @@ if not args.disable_opening_odds and "opening_prob_home_fair" in df.columns:
 
 **Issue**: If training data had higher opening odds coverage than test data, the model learns a different baseline distribution than it encounters at inference time.
 
+### Evidence - Missing Opening Odds Breakdown
+
+#### 1. Early October Games (Oct 10-17) - 42 Games Truly Missing
+
+**Command**:
+```bash
+grep -E "2025-10-1[0-7]" data/stats-csv/nba_main_lines.csv
+```
+
+**Output**: (empty - no results)
+
+**Evidence**: CSV file `nba_main_lines.csv` has **no data** for Oct 10-17 dates.
+
+**Sample Missing Games**:
+- **Command**:
+  ```sql
+  SELECT c.game_id, DATE(sg.event_date) as game_date, sg.home_team_abbrev, sg.away_team_abbrev 
+  FROM derived.snapshot_features_v1 c 
+  LEFT JOIN espn.scoreboard_games sg ON c.game_id = sg.event_id 
+  WHERE c.season_label = '2025-26' 
+    AND DATE(c.snapshot_ts) >= '2025-10-10' 
+    AND DATE(c.snapshot_ts) <= '2025-10-17' 
+    AND c.opening_moneyline_home IS NULL 
+  GROUP BY c.game_id, DATE(sg.event_date), sg.home_team_abbrev, sg.away_team_abbrev 
+  ORDER BY game_date LIMIT 10;
+  ```
+- **Output**:
+  ```
+   game_id  | game_date  | home_team_abbrev | away_team_abbrev 
+  ----------+------------+------------------+------------------
+  401812696 | 2025-10-10 | BKN              | PHX
+  401812697 | 2025-10-10 | TOR              | BOS
+  401812698 | 2025-10-10 | PHI              | ORL
+  401812699 | 2025-10-10 | SA               | UTAH
+  401812700 | 2025-10-10 | POR              | SAC
+  401812701 | 2025-10-11 | IND              | OKC
+  401812702 | 2025-10-11 | MEM              | ATL
+  401812703 | 2025-10-11 | DAL              | CHA
+  401812704 | 2025-10-12 | PHX              | BKN
+  401812705 | 2025-10-12 | WSH              | TOR
+  ```
+
+#### 2. Games Needing Materialized View Refresh - 54 Games
+
+**Command**:
+```sql
+SELECT COUNT(DISTINCT c.game_id) 
+FROM derived.snapshot_features_v1 c 
+WHERE c.season_label = '2025-26' 
+  AND c.opening_moneyline_home IS NULL 
+  AND EXISTS (
+    SELECT 1 FROM external.sportsbook_odds_snapshots s2 
+    WHERE s2.espn_game_id = c.game_id AND s2.is_opening_line = TRUE
+  );
+```
+
+**Output**: **54 games**
+
+**Evidence**: These games have opening odds in `external.sportsbook_odds_snapshots` but NOT in canonical dataset.
+
+**Sample Games**:
+- **Command**:
+  ```sql
+  SELECT s.espn_game_id, DATE(sg.event_date) as game_date, sg.home_team_abbrev, sg.away_team_abbrev, 
+         COUNT(*) as odds_records, MIN(s.snapshot_timestamp) as earliest_odds 
+  FROM external.sportsbook_odds_snapshots s 
+  JOIN espn.scoreboard_games sg ON s.espn_game_id = sg.event_id 
+  WHERE s.espn_game_id IN (
+    SELECT DISTINCT game_id FROM derived.snapshot_features_v1 
+    WHERE season_label = '2025-26' AND opening_moneyline_home IS NULL
+  ) AND s.is_opening_line = TRUE 
+  GROUP BY s.espn_game_id, DATE(sg.event_date), sg.home_team_abbrev, sg.away_team_abbrev 
+  ORDER BY game_date LIMIT 10;
+  ```
+- **Output**:
+  ```
+   espn_game_id | game_date  | home_team_abbrev | away_team_abbrev | odds_records |     earliest_odds      
+  --------------+------------+------------------+------------------+--------------+------------------------
+   401809234    | 2025-10-22 | NY               | CLE              |           12 | 2025-10-21 11:59:56-07
+   401809939    | 2025-10-22 | MIL              | WSH              |            6 | 2025-10-22 13:30:35-07
+   401809945    | 2025-10-24 | NY               | BOS              |            6 | 2025-10-24 12:22:08-07
+   401809950    | 2025-10-24 | DAL              | WSH              |            6 | 2025-10-24 15:44:39-07
+   401809963    | 2025-10-26 | MIA              | NY               |            6 | 2025-10-26 11:35:25-07
+   401809964    | 2025-10-26 | WSH              | CHA              |            6 | 2025-10-26 11:35:25-07
+   401809978    | 2025-10-28 | WSH              | PHI              |            6 | 2025-10-28 11:42:46-07
+   401809505    | 2025-10-31 | CHI              | NY               |            6 | 2025-10-31 14:42:02-07
+   401810000    | 2025-11-01 | WSH              | ORL              |            6 | 2025-11-01 12:42:11-07
+   401810008    | 2025-11-02 | NY               | CHI              |            6 | 2025-11-02 11:09:01-08
+  ```
+
+**Root Cause**: Opening odds were loaded on **Jan 22, 2026** (2026-01-22 11:24:16), but materialized view `derived.snapshot_features_v1` was created/refreshed **BEFORE** that date.
+
+**Verification**:
+- **Command**:
+  ```sql
+  SELECT MIN(created_at) as first_loaded, MAX(created_at) as last_loaded, 
+         COUNT(DISTINCT espn_game_id) as games, source_dataset 
+  FROM external.sportsbook_odds_snapshots 
+  WHERE espn_game_id IN (
+    SELECT DISTINCT game_id FROM derived.snapshot_features_v1 WHERE season_label = '2025-26'
+  ) AND is_opening_line = TRUE 
+  GROUP BY source_dataset;
+  ```
+- **Output**:
+  ```
+         first_loaded          |          last_loaded          | games | source_dataset 
+  -----------------------------+-------------------------------+-------+----------------
+  2026-01-22 11:24:16.875832-08 | 2026-01-22 11:24:20.634264-08 |   452 | nba_main_lines
+  ```
+
+#### 3. Later Dates Truly Missing - 13 Games
+
+**Command**:
+```sql
+SELECT DATE(sg.event_date) as game_date, COUNT(DISTINCT c.game_id) as truly_missing 
+FROM derived.snapshot_features_v1 c 
+LEFT JOIN espn.scoreboard_games sg ON c.game_id = sg.event_id 
+WHERE c.season_label = '2025-26' 
+  AND c.opening_moneyline_home IS NULL 
+  AND NOT EXISTS (
+    SELECT 1 FROM external.sportsbook_odds_snapshots s2 
+    WHERE s2.espn_game_id = c.game_id AND s2.is_opening_line = TRUE
+  ) 
+GROUP BY DATE(sg.event_date) 
+ORDER BY game_date;
+```
+
+**Output**: 13 games spread across various dates (Oct 26, Oct 28, Oct 30, Nov 22-23, Dec 7, Dec 27)
+
+**Evidence**: These games exist in canonical dataset but have no opening odds in `external.sportsbook_odds_snapshots`.
+
+**Possible Reasons**:
+- Data not collected/scraped for these specific games
+- Team name mapping failures (games in CSV but couldn't be matched to ESPN game IDs)
+- Games not in `nba_main_lines.csv` file
+
 ## Root Cause Analysis
 
 ### Primary Cause: Training/Inference Distribution Mismatch
@@ -305,14 +452,29 @@ if not args.disable_opening_odds and "opening_prob_home_fair" in df.columns:
 
 ### Short-term Improvements (Priority: Medium)
 
-3. **Retrain Odds Models with Lower Opening Odds Coverage**
-   - **Action**: If training data has higher coverage than test data, retrain odds models with matched coverage (e.g., filter training data to 44.2% coverage)
-   - **Files to Modify**: `scripts/model/train_winprob_catboost.py`
-   - **Estimated Effort**: 8 hours
+3. **Investigate Truly Missing Opening Odds (55 games)**
+   - **Action**: Investigate why 55 games don't have opening odds in data source
+   - **Breakdown**:
+     - **42 games (Oct 10-17)**: CSV file `nba_main_lines.csv` has no data for these dates
+     - **13 games (after Oct 17)**: Games exist in canonical but no opening odds in `external.sportsbook_odds_snapshots`
+   - **Specific Actions**:
+     - Verify if Pinnacle has odds data for the 55 missing games
+     - Check if `nba_main_lines.csv` needs to be updated with missing dates
+     - Investigate team name mapping failures (check if games exist in CSV but couldn't be matched to ESPN game IDs)
+     - Re-scrape or obtain missing odds data for those games
+   - **Files to Modify**: Data ingestion scripts, CSV data source, team name mapping
+   - **Estimated Effort**: 16 hours
    - **Risk Level**: Medium
-   - **Success Metrics**: Retrained models perform better on test data
+   - **Success Metrics**: Opening odds coverage increases to 93%+ for games with Kalshi data (matching training data coverage)
 
-4. **Consider Odds Models Only for Games With Opening Odds**
+4. **Retrain Odds Models After View Refresh**
+   - **Action**: After refreshing materialized view (bringing coverage to 89.3%), evaluate if models need retraining or if performance improves
+   - **Files to Modify**: `scripts/model/train_winprob_catboost.py` (if retraining needed)
+   - **Estimated Effort**: 8 hours (if retraining needed)
+   - **Risk Level**: Medium
+   - **Success Metrics**: Odds models perform better after view refresh and/or retraining
+
+5. **Consider Odds Models Only for Games With Opening Odds**
    - **Action**: Evaluate whether odds models should only be used for games where opening odds are available, falling back to baseline models otherwise
    - **Files to Modify**: `scripts/trade/simulate_trading_strategy.py`, `scripts/trade/grid_search_hyperparameters.py`
    - **Estimated Effort**: 4 hours
@@ -320,20 +482,6 @@ if not args.disable_opening_odds and "opening_prob_home_fair" in df.columns:
    - **Success Metrics**: Improved performance by using appropriate model for each game
 
 ### Long-term Strategic Changes (Priority: Low)
-
-5. **Improve Opening Odds Data Collection**
-   - **Action**: Investigate why opening odds coverage is 78.8% for games with Kalshi data (107 games missing opening odds)
-   - **Root Cause Identified**: 107 games (21.2%) of games with Kalshi data don't have opening odds in the canonical dataset
-   - **Specific Actions**:
-     - Verify if Pinnacle has odds data for the 107 missing games
-     - Re-scrape or obtain missing odds data for those games
-     - Investigate team name mapping failures (check if games exist in CSV but couldn't be matched to ESPN game IDs)
-     - Check if data collection process is missing games or if source data is incomplete
-     - Verify if opening odds need to be backfilled for games already in canonical dataset
-   - **Files to Modify**: Data ingestion scripts, CSV data source, team name mapping, backfill scripts
-   - **Estimated Effort**: 16 hours
-   - **Risk Level**: Medium
-   - **Success Metrics**: Opening odds coverage increases to 90%+ for games with Kalshi data (matching training data coverage)
 
 6. **Hybrid Model Approach**
    - **Action**: Train a model that can handle both cases (with/without opening odds) by using opening odds as a feature (not just baseline) when available
@@ -366,22 +514,66 @@ if not args.disable_opening_odds and "opening_prob_home_fair" in df.columns:
 - **Games missing opening odds**: 107 games (21.2%)
 - **Date Range**: Oct 10, 2025 to Dec 27, 2025
 
-**Why Some Games Are Missing Opening Odds**:
-1. **107 games (21.2%)** of games with Kalshi data don't have opening odds
-2. **Possible Reasons**:
-   - Opening odds weren't collected/scraped for those games
-   - Pinnacle (data source) didn't have odds available
-   - Team name mapping failures (games in CSV but couldn't be matched to ESPN game IDs)
-   - Games were added to canonical dataset but opening odds weren't loaded yet
+### Breakdown of Missing Opening Odds (107 games)
+
+**Command**:
+```bash
+psql "$DATABASE_URL" -c "SELECT 'Early Oct (10-17)' as period, COUNT(DISTINCT c.game_id) as missing_games, 'TRULY_MISSING' as reason FROM derived.snapshot_features_v1 c WHERE c.season_label = '2025-26' AND DATE(c.snapshot_ts) >= '2025-10-10' AND DATE(c.snapshot_ts) <= '2025-10-17' AND c.opening_moneyline_home IS NULL UNION ALL SELECT 'After Oct 17' as period, COUNT(DISTINCT c.game_id) as missing_games, 'NEEDS_REFRESH' as reason FROM derived.snapshot_features_v1 c WHERE c.season_label = '2025-26' AND DATE(c.snapshot_ts) > '2025-10-17' AND c.opening_moneyline_home IS NULL AND EXISTS (SELECT 1 FROM external.sportsbook_odds_snapshots s2 WHERE s2.espn_game_id = c.game_id AND s2.is_opening_line = TRUE) UNION ALL SELECT 'After Oct 17' as period, COUNT(DISTINCT c.game_id) as missing_games, 'TRULY_MISSING' as reason FROM derived.snapshot_features_v1 c WHERE c.season_label = '2025-26' AND DATE(c.snapshot_ts) > '2025-10-17' AND c.opening_moneyline_home IS NULL AND NOT EXISTS (SELECT 1 FROM external.sportsbook_odds_snapshots s2 WHERE s2.espn_game_id = c.game_id AND s2.is_opening_line = TRUE);"
+```
+
+**Output**:
+```
+      period       | missing_games |    reason     
+-------------------+---------------+---------------
+ Early Oct (10-17) |            42 | TRULY_MISSING
+ After Oct 17      |            13 | TRULY_MISSING
+ After Oct 17      |            54 | NEEDS_REFRESH
+```
+
+**Breakdown**:
+1. **42 games (Oct 10-17)**: **TRULY_MISSING** - No opening odds data in `external.sportsbook_odds_snapshots` or CSV file
+   - **Evidence**: `grep -E "2025-10-1[0-7]" data/stats-csv/nba_main_lines.csv` returns no results
+   - **CSV date range**: 2025-09-10 to 2026-01-12, but **skips Oct 10-17**
+   - **Sample games**: 401812696 (BKN vs PHX), 401812697 (TOR vs BOS), 401812698 (PHI vs ORL), etc.
+
+2. **54 games (after Oct 17)**: **NEEDS_REFRESH** - Opening odds exist in `external.sportsbook_odds_snapshots` but NOT in canonical dataset
+   - **Evidence**: 
+     ```bash
+     psql "$DATABASE_URL" -c "SELECT COUNT(DISTINCT c.game_id) FROM derived.snapshot_features_v1 c WHERE c.season_label = '2025-26' AND c.opening_moneyline_home IS NULL AND EXISTS (SELECT 1 FROM external.sportsbook_odds_snapshots s2 WHERE s2.espn_game_id = c.game_id AND s2.is_opening_line = TRUE);"
+     ```
+     Returns: **54 games**
+   - **Root Cause**: Materialized view `derived.snapshot_features_v1` was created/refreshed **BEFORE** opening odds were loaded (opening odds loaded Jan 22, 2026)
+   - **Sample games**: 401809234 (NY vs CLE, Oct 22), 401809939 (MIL vs WSH, Oct 22), 401809945 (NY vs BOS, Oct 24)
+   - **Fix**: Refresh materialized view: `REFRESH MATERIALIZED VIEW CONCURRENTLY derived.snapshot_features_v1;`
+
+3. **13 games (after Oct 17)**: **TRULY_MISSING** - No opening odds in `external.sportsbook_odds_snapshots`
+   - **Evidence**: Games exist in canonical dataset but no matching records in `external.sportsbook_odds_snapshots` with `is_opening_line = TRUE`
+   - **Possible reasons**: Data not collected, team name mapping failures, or games not in CSV
+
+**Data Source**:
+- **Source**: `nba_main_lines.csv` (5,133 rows)
+- **Loaded**: Jan 22, 2026 (2026-01-22 11:24:16 to 11:24:20)
+- **Source dataset**: `nba_main_lines` (all from Pinnacle bookmaker)
+- **Games in table**: 452 games with opening odds in `external.sportsbook_odds_snapshots` for canonical games
+- **Games in canonical**: 398 games with opening odds (54 games missing due to stale materialized view)
 
 **Comparison to Training Data**:
 - **Training data (2017-2023)**: 93.6% opening odds coverage
 - **Test data (2025-26, games with Kalshi)**: 78.8% opening odds coverage
 - **Gap**: 14.8 percentage point drop (93.6% → 78.8%)
+- **If view refreshed**: Would be **89.3% coverage** (452 games with odds / 505 games with Kalshi data)
+- **Remaining gap**: 4.3 percentage points (93.6% → 89.3%) due to 55 truly missing games (42 + 13)
 
 ## Conclusion
 
-**Root Cause**: Odds models underperform because of a **training/inference distribution mismatch**. Training data (2017-2023) has **93.6% opening odds coverage**, but games with Kalshi data in 2025-26 have **78.8% coverage** (398 out of 505 games). This 14.8 percentage point drop causes models to default to 50/50 baseline for 21.2% of games (107 games) instead of the learned opening odds baseline, creating a distribution shift that degrades performance.
+**Root Cause**: Odds models underperform because of a **training/inference distribution mismatch**. Training data (2017-2023) has **93.6% opening odds coverage**, but games with Kalshi data in 2025-26 have **78.8% coverage** (398 out of 505 games). 
+
+**Breakdown of Missing Odds (107 games)**:
+- **54 games (50.5%)**: Opening odds exist in `external.sportsbook_odds_snapshots` but materialized view `derived.snapshot_features_v1` hasn't been refreshed since opening odds were loaded (Jan 22, 2026)
+- **42 games (39.3%)**: Truly missing from data source - `nba_main_lines.csv` has no data for Oct 10-17 dates
+- **13 games (12.1%)**: Truly missing from data source - games exist in canonical but no opening odds in `external.sportsbook_odds_snapshots`
+
+**Impact**: This 14.8 percentage point drop causes models to default to 50/50 baseline for 21.2% of games (107 games) instead of the learned opening odds baseline, creating a distribution shift that degrades performance. **After refreshing the materialized view, coverage would improve to 89.3% (452/505 games), reducing the gap to 4.3 percentage points.**
 
 **Evidence**:
 - Odds models perform 26-57% worse than baseline models
@@ -390,9 +582,11 @@ if not args.disable_opening_odds and "opening_prob_home_fair" in df.columns:
 - Model learns to predict residuals from opening odds baseline, but encounters different distribution at inference
 
 **Next Steps**:
-1. ✅ **COMPLETED**: Verified opening odds coverage - Training: 93.6%, Test: 44.2% (49.4 pp drop)
-2. Compare odds model performance on games with vs without opening odds
-3. Consider retraining with matched coverage (44.2%) or using odds models only for games with opening odds
+1. ✅ **COMPLETED**: Verified opening odds coverage - Training: 93.6%, Test: 78.8% (14.8 pp drop)
+2. **IMMEDIATE**: Refresh materialized view to bring coverage to 89.3% (54 games will be fixed)
+3. Investigate 55 truly missing games (42 early Oct + 13 later dates)
+4. Compare odds model performance on games with vs without opening odds (after view refresh)
+5. Consider retraining or using odds models only for games with opening odds
 
 ---
 
